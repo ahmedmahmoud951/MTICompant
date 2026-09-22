@@ -2,10 +2,12 @@ namespace MTI.ProjectManagement.Application.DTOs;
 
 public record ConversationMemberDto(
     Guid UserId,
-    string FullName,
+    string UserName,
     string Email,
     string Role,
-    DateTime JoinedAt
+    DateTime JoinedAt,
+    DateTime? LastSeenAt = null,
+    bool IsOnline = false
 );
 
 public record MessageAttachmentDto(

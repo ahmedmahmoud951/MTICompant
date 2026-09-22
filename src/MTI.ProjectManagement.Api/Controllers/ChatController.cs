@@ -48,6 +48,7 @@ public class ChatController : ControllerBase
             .Include(c => c.Project)
             .Include(c => c.Members).ThenInclude(m => m.User)
             .Include(c => c.Messages.Where(m => !m.IsDeleted)).ThenInclude(m => m.Sender)
+            .Include(c => c.Messages.Where(m => !m.IsDeleted)).ThenInclude(m => m.ReadStates).ThenInclude(rs => rs.User)
             .OrderByDescending(c => c.Messages.Max(m => (DateTime?)m.CreatedAt) ?? c.CreatedAt)
             .ToListAsync(cancellationToken);
 
@@ -55,18 +56,18 @@ public class ChatController : ControllerBase
 
         foreach (var c in convs)
         {
-            var members = c.Members.Select(m => new ConversationMemberDto(
-                m.UserId,
-                $"{m.User.FirstName} {m.User.LastName}",
-                m.User.Email,
-                m.IsAdmin ? "Admin" : "Member",
-                m.JoinedAt
-            )).ToList();
+            var members = c.Members.Select(m => MapMember(m)).ToList();
 
             var lastMsg = c.Messages.OrderByDescending(m => m.CreatedAt).FirstOrDefault();
             MessageDto? lastMsgDto = null;
             if (lastMsg != null)
             {
+                var readStates = lastMsg.ReadStates.Select(rs => new MessageReadStateDto(
+                    rs.UserId,
+                    rs.User != null ? $"{rs.User.FirstName} {rs.User.LastName}" : "",
+                    rs.ReadAt
+                )).ToList();
+
                 lastMsgDto = new MessageDto(
                     lastMsg.Id,
                     lastMsg.ConversationId,
@@ -78,7 +79,7 @@ public class ChatController : ControllerBase
                     lastMsg.CreatedAt,
                     new List<MessageAttachmentDto>(),
                     new List<MessageReactionDto>(),
-                    new List<MessageReadStateDto>()
+                    readStates
                 );
             }
 
@@ -88,9 +89,17 @@ public class ChatController : ControllerBase
                             !m.ReadStates.Any(rs => rs.UserId == userId))
                 .CountAsync(cancellationToken);
 
+            var displayTitle = c.Title;
+            if (!c.IsGroup)
+            {
+                var other = c.Members.FirstOrDefault(m => m.UserId != userId)?.User;
+                if (other != null)
+                    displayTitle = $"{other.FirstName} {other.LastName}";
+            }
+
             list.Add(new ConversationSummaryDto(
                 c.Id,
-                c.Title,
+                displayTitle,
                 c.IsGroup,
                 c.ProjectId,
                 c.Project?.Name,
@@ -102,6 +111,21 @@ public class ChatController : ControllerBase
         }
 
         return Ok(list);
+    }
+
+    private static ConversationMemberDto MapMember(ConversationMember m)
+    {
+        var lastSeen = UserPresenceTracker.GetLastSeen(m.UserId) ?? m.User?.LastLoginAt;
+        var isOnline = UserPresenceTracker.IsOnline(m.UserId);
+        return new ConversationMemberDto(
+            m.UserId,
+            m.User != null ? $"{m.User.FirstName} {m.User.LastName}" : "",
+            m.User?.Email ?? "",
+            m.IsAdmin ? "Admin" : "Member",
+            m.JoinedAt,
+            lastSeen,
+            isOnline
+        );
     }
 
     [HttpGet("contacts")]
@@ -160,13 +184,7 @@ public class ChatController : ControllerBase
 
         if (existingConv != null)
         {
-            var members = existingConv.Members.Select(m => new ConversationMemberDto(
-                m.UserId,
-                $"{m.User.FirstName} {m.User.LastName}",
-                m.User.Email,
-                m.IsAdmin ? "Admin" : "Member",
-                m.JoinedAt
-            )).ToList();
+            var members = existingConv.Members.Select(MapMember).ToList();
 
             return Ok(new ConversationSummaryDto(
                 existingConv.Id,
@@ -197,8 +215,22 @@ public class ChatController : ControllerBase
         var currentUser = await _dbContext.Users.FindAsync(new object[] { userId }, cancellationToken);
         var memberDtos = new List<ConversationMemberDto>
         {
-            new ConversationMemberDto(userId, $"{currentUser?.FirstName} {currentUser?.LastName}", currentUser?.Email ?? "", "Admin", DateTime.UtcNow),
-            new ConversationMemberDto(otherUser.Id, $"{otherUser.FirstName} {otherUser.LastName}", otherUser.Email, "Member", DateTime.UtcNow)
+            new ConversationMemberDto(
+                userId,
+                $"{currentUser?.FirstName} {currentUser?.LastName}",
+                currentUser?.Email ?? "",
+                "Admin",
+                DateTime.UtcNow,
+                UserPresenceTracker.GetLastSeen(userId) ?? currentUser?.LastLoginAt,
+                UserPresenceTracker.IsOnline(userId)),
+            new ConversationMemberDto(
+                otherUser.Id,
+                $"{otherUser.FirstName} {otherUser.LastName}",
+                otherUser.Email,
+                "Member",
+                DateTime.UtcNow,
+                UserPresenceTracker.GetLastSeen(otherUser.Id) ?? otherUser.LastLoginAt,
+                UserPresenceTracker.IsOnline(otherUser.Id))
         };
 
         return Ok(new ConversationSummaryDto(

@@ -169,6 +169,8 @@ export interface ConversationMember {
   userEmail: string;
   role: string;
   lastReadAt?: string;
+  lastSeenAt?: string;
+  isOnline?: boolean;
 }
 
 export interface Conversation {

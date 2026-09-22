@@ -33,7 +33,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ar" dir="rtl" className={`${display.variable} ${body.variable} ${arabic.variable}`}>
-      <body className="bg-[#eef4fa] text-[#1e3a5f] antialiased font-[family-name:var(--font-body)]">
+      <body className="bg-[#0b1524] text-[#e8eef8] antialiased font-[family-name:var(--font-body)]">
         {children}
       </body>
     </html>

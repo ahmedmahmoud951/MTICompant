@@ -38,6 +38,15 @@ public class ProjectHub : Hub
             }
 
             await Clients.Others.SendAsync("UserOnline", new { userId = userId.Value, timestamp = DateTime.UtcNow });
+            UserPresenceTracker.SetOnline(userId.Value);
+
+            // Persist last activity for last-seen after restarts
+            var dbUser = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId.Value);
+            if (dbUser != null)
+            {
+                dbUser.LastLoginAt = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync(CancellationToken.None);
+            }
         }
         await base.OnConnectedAsync();
     }
@@ -47,7 +56,15 @@ public class ProjectHub : Hub
         var userId = GetUserId();
         if (userId.HasValue)
         {
+            UserPresenceTracker.SetOffline(userId.Value);
             await Clients.Others.SendAsync("UserOffline", new { userId = userId.Value, timestamp = DateTime.UtcNow });
+
+            var dbUser = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId.Value);
+            if (dbUser != null)
+            {
+                dbUser.LastLoginAt = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync(CancellationToken.None);
+            }
         }
         await base.OnDisconnectedAsync(exception);
     }

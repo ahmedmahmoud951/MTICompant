@@ -15,6 +15,7 @@ import {
   User,
   Conversation,
   Message,
+  ConversationMember,
   TaskItem,
   ProjectDataRecord,
   AdminDashboardStats,
@@ -125,9 +126,12 @@ export default function Home() {
   const [showMessagesDropdown, setShowMessagesDropdown] = useState(false);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [chatSearchUser, setChatSearchUser] = useState('');
+  const [chatListSearch, setChatListSearch] = useState('');
   const [showNewChatModal, setShowNewChatModal] = useState(false);
   const [chatContacts, setChatContacts] = useState<any[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(false);
+  const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set());
+  const [lastSeenMap, setLastSeenMap] = useState<Record<string, string>>({});
 
   // Floating Toast Notifications (Tasks & Chat)
   const [toasts, setToasts] = useState<
@@ -255,6 +259,22 @@ export default function Home() {
   }, [showNewChatModal, chatSearchUser]);
 
   useEffect(() => {
+    if (activeTab === 'chat' && currentUser) {
+      chatService
+        .getConversations()
+        .then((convs) => {
+          setConversations(convs);
+          syncPresenceFromConversations(convs);
+          const conn = signalRService.getConnection();
+          if (conn) {
+            convs.forEach((c) => conn.invoke('JoinConversation', c.id).catch(() => {}));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [activeTab, currentUser]);
+
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       const savedLang = (localStorage.getItem('mti_lang') as Language) || 'ar';
       setLang(savedLang);
@@ -295,7 +315,7 @@ export default function Home() {
               chatService.markAsRead(msg.conversationId).catch(() => {});
             }
           }
-          chatService.getConversations().then(setConversations).catch(() => {});
+          chatService.getConversations().then((convs) => { setConversations(convs); syncPresenceFromConversations(convs); }).catch(() => {});
         });
 
         conn.on('MessageDelivered', (payload: { messageId: string; conversationId: string; recipientUserId: string }) => {
@@ -330,7 +350,22 @@ export default function Home() {
               })
             );
           }
-          chatService.getConversations().then(setConversations).catch(() => {});
+          chatService.getConversations().then((convs) => { setConversations(convs); syncPresenceFromConversations(convs); }).catch(() => {});
+        });
+
+        conn.on('UserOnline', (payload: { userId: string; timestamp: string }) => {
+          const id = String(payload.userId);
+          setOnlineUserIds((prev) => new Set(prev).add(id));
+          setLastSeenMap((prev) => ({ ...prev, [id]: payload.timestamp || new Date().toISOString() }));
+        });
+        conn.on('UserOffline', (payload: { userId: string; timestamp: string }) => {
+          const id = String(payload.userId);
+          setOnlineUserIds((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+          setLastSeenMap((prev) => ({ ...prev, [id]: payload.timestamp || new Date().toISOString() }));
         });
 
         // Real-Time Notifications
@@ -444,6 +479,7 @@ export default function Home() {
       taskService.getTasks().then(setTasks).catch(() => {});
       chatService.getConversations().then((convs) => {
         setConversations(convs);
+        syncPresenceFromConversations(convs);
         const conn = signalRService.getConnection();
         if (conn) {
           convs.forEach((c) => conn.invoke('JoinConversation', c.id).catch(() => {}));
@@ -531,6 +567,83 @@ export default function Home() {
   };
 
   // Chat Actions
+  const getConversationDisplayName = (conv: Conversation) => {
+    if (!conv.isGroup) {
+      const other = conv.members?.find((m) => m.userId !== currentUser?.id);
+      const name = other?.userName || (other as any)?.fullName;
+      if (name?.trim()) return name.trim();
+    }
+    if (conv.title?.trim()) return conv.title.trim();
+    return lang === 'ar' ? 'محادثة مباشرة' : 'Direct Chat';
+  };
+
+  const syncPresenceFromConversations = (convs: Conversation[]) => {
+    setOnlineUserIds((prev) => {
+      const next = new Set(prev);
+      convs.forEach((c) =>
+        c.members?.forEach((m) => {
+          if (m.isOnline) next.add(String(m.userId));
+        })
+      );
+      return next;
+    });
+    setLastSeenMap((prev) => {
+      const next = { ...prev };
+      convs.forEach((c) =>
+        c.members?.forEach((m) => {
+          if (m.lastSeenAt) next[String(m.userId)] = m.lastSeenAt!;
+        })
+      );
+      return next;
+    });
+  };
+
+  const formatLastSeen = (iso?: string | null, isOnline?: boolean) => {
+    if (isOnline) return t('online');
+    if (!iso) return lang === 'ar' ? 'غير معروف' : 'Unknown';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return lang === 'ar' ? 'غير معروف' : 'Unknown';
+    const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+    if (mins < 1) return t('lastSeenJustNow');
+    if (mins < 60) return t('lastSeenMinutes').replace('{n}', String(mins));
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return t('lastSeenHours').replace('{n}', String(hours));
+    const days = Math.floor(hours / 24);
+    return t('lastSeenDays').replace('{n}', String(days));
+  };
+
+  const getMemberPresence = (member?: ConversationMember | null) => {
+    if (!member) return { isOnline: false, lastSeenAt: undefined as string | undefined };
+    const id = String(member.userId);
+    const isOnline = onlineUserIds.has(id) || !!member.isOnline;
+    const lastSeenAt = lastSeenMap[id] || member.lastSeenAt;
+    return { isOnline, lastSeenAt };
+  };
+
+  const getLastMessageTicks = (conv: Conversation) => {
+    const lm = conv.lastMessage;
+    if (!lm || !currentUser || lm.senderUserId !== currentUser.id) return null;
+    const readByOther =
+      (lm.readStates && lm.readStates.some((rs) => rs.userId !== currentUser.id)) ||
+      lm.deliveryStatus === 'read';
+    if (readByOther) return 'read' as const;
+    if (lm.isDelivered || lm.deliveryStatus === 'delivered' || deliveredMessageIds.has(lm.id))
+      return 'delivered' as const;
+    if (lm.deliveryStatus === 'failed') return 'failed' as const;
+    if (lm.deliveryStatus === 'sending') return 'sending' as const;
+    return 'sent' as const;
+  };
+
+  const filteredConversations = useMemo(() => {
+    const q = chatListSearch.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) => {
+      const name = getConversationDisplayName(c).toLowerCase();
+      const last = (c.lastMessage?.content || '').toLowerCase();
+      return name.includes(q) || last.includes(q);
+    });
+  }, [conversations, chatListSearch, currentUser, lang]);
+
   const openConversation = async (conv: Conversation) => {
     setActiveConversation(conv);
     try {
@@ -541,6 +654,7 @@ export default function Home() {
     } catch {}
     await loadMessages(conv.id);
     await chatService.markAsRead(conv.id);
+    chatService.getConversations().then((convs) => { setConversations(convs); syncPresenceFromConversations(convs); }).catch(() => {});
   };
 
   const loadMessages = async (convId: string) => {
@@ -580,7 +694,7 @@ export default function Home() {
       setChatMessages((prev) =>
         prev.map((m) => (m.id === tempId ? { ...sent, deliveryStatus: 'sent' } : m))
       );
-      chatService.getConversations().then(setConversations).catch(() => {});
+      chatService.getConversations().then((convs) => { setConversations(convs); syncPresenceFromConversations(convs); }).catch(() => {});
     } catch (err: any) {
       logger.error('Failed to send message', err);
       setChatMessages((prev) =>
@@ -786,7 +900,7 @@ export default function Home() {
   // -------------------------------------------------------------
   if (!currentUser) {
     return (
-      <div className="login-canvas min-h-screen flex items-center justify-center px-4 py-10 text-slate-800">
+      <div className="login-canvas min-h-screen flex items-center justify-center px-4 py-10 text-slate-100">
         <div className="login-orb login-orb-a" aria-hidden />
         <div className="login-orb login-orb-b" aria-hidden />
         <div className="login-orb login-orb-c" aria-hidden />
@@ -798,7 +912,7 @@ export default function Home() {
             <button
               onClick={toggleLanguage}
               type="button"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white hover:bg-slate-100 border border-sky-200 text-xs text-slate-700 transition-all backdrop-blur-md shadow-lg"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/70 hover:bg-slate-700/45 border border-slate-500/40 text-xs text-slate-200 transition-all backdrop-blur-md shadow-lg"
             >
               <span>{lang === 'ar' ? '🇺🇸' : '🇪🇬'}</span>
               <span className="font-semibold">{lang === 'ar' ? 'English' : 'عربي'}</span>
@@ -834,7 +948,7 @@ export default function Home() {
 
             <div className="relative px-7 pb-8 pt-5">
               {errorMsg && (
-                <div className="mb-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 text-xs flex items-start gap-2.5">
+                <div className="mb-4 p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-400 text-xs flex items-start gap-2.5">
                   <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                   <span className="leading-relaxed">{errorMsg}</span>
                 </div>
@@ -883,7 +997,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setShowPassword((v) => !v)}
-                      className="absolute right-3 rtl:right-auto rtl:left-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-500 hover:text-sky-600 transition-colors"
+                      className="absolute right-3 rtl:right-auto rtl:left-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-500 hover:text-cyan-400 transition-colors"
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -957,7 +1071,7 @@ export default function Home() {
   // Authenticated Desktop & Mobile Responsive Enterprise Layout
   // -------------------------------------------------------------
   return (
-    <div className="app-shell min-h-screen text-slate-800 flex font-body overflow-hidden">
+    <div className="app-shell min-h-screen text-slate-100 flex font-body overflow-hidden">
       {/* 1. DESKTOP SIDEBAR (Visible on lg and larger) */}
       <aside
         className={`hidden lg:flex ${
@@ -965,9 +1079,9 @@ export default function Home() {
         } glass-nav flex-col transition-all duration-300 ease-in-out z-30`}
       >
         {/* Sidebar Header / Logo */}
-        <div className="p-4 border-b border-sky-100 flex items-center justify-between">
+        <div className="p-4 border-b border-slate-600/50 flex items-center justify-between">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="p-1 rounded-xl bg-[#0b0b0b] border border-sky-200 flex-shrink-0 flex items-center justify-center">
+            <div className="p-1 rounded-xl bg-[#0b0b0b] border border-slate-500/40 flex-shrink-0 flex items-center justify-center">
               <img
                 src="/images/CompanyLogo.png"
                 alt="MTI Logo"
@@ -976,14 +1090,14 @@ export default function Home() {
             </div>
             {!sidebarCollapsed && (
               <div>
-                <div className="font-display font-bold text-slate-800 text-sm leading-tight truncate">{t('appName')}</div>
-                <div className="text-[10px] text-mti-600 tracking-wide font-medium">{t('appSubtitle')}</div>
+                <div className="font-display font-bold text-slate-100 text-sm leading-tight truncate">{t('appName')}</div>
+                <div className="text-[10px] text-cyan-300 tracking-wide font-medium">{t('appSubtitle')}</div>
               </div>
             )}
           </div>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-1.5 rounded-lg hover:bg-sky-50 text-slate-400 hover:text-slate-800 transition-colors"
+            className="p-1.5 rounded-lg hover:bg-slate-700/40 text-slate-400 hover:text-slate-100 transition-colors"
           >
             <ChevronLeft className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} />
           </button>
@@ -1002,10 +1116,10 @@ export default function Home() {
                   logger.info('Tab switched', { tab: item.id });
                   if (item.id === 'my-projects' || item.id === 'projects') loadProjects();
                 }}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   isCurrent
                     ? 'nav-item-active'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-sky-50'
+                    : 'text-slate-500 hover:text-slate-100 hover:bg-slate-700/40'
                 }`}
                 title={sidebarCollapsed ? item.label : undefined}
               >
@@ -1014,7 +1128,7 @@ export default function Home() {
                   {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
                 </div>
                 {!sidebarCollapsed && item.badge && item.badge > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px]">
+                  <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-white font-bold text-[10px]">
                     {item.badge}
                   </span>
                 )}
@@ -1024,17 +1138,17 @@ export default function Home() {
         </div>
 
         {/* Sidebar Footer User Info */}
-        <div className="p-3 border-t border-sky-100 bg-sky-50/80">
+        <div className="p-3 border-t border-slate-600/50 bg-slate-800/50">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <div className="w-8 h-8 rounded-full bg-mti-100 border border-mti-200 flex items-center justify-center font-bold text-xs text-mti-700 flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-mti-100 border border-cyan-400/25 flex items-center justify-center font-bold text-xs text-mti-700 flex-shrink-0">
                 {currentUser.firstName[0]}
                 {currentUser.lastName[0]}
               </div>
               {!sidebarCollapsed && (
                 <div className="truncate text-start">
-                  <div className="text-xs font-semibold text-slate-800 truncate">{currentUser.fullName}</div>
-                  <div className="text-[10px] text-mti-600 truncate">
+                  <div className="text-xs font-semibold text-slate-100 truncate">{currentUser.fullName}</div>
+                  <div className="text-[10px] text-cyan-300 truncate">
                     {currentUser.jobTitle || currentUser.roles.join(', ')}
                   </div>
                 </div>
@@ -1044,7 +1158,7 @@ export default function Home() {
               <button
                 onClick={handleLogout}
                 title={t('signOut')}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-sky-50 transition-colors"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-700/40 transition-colors"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -1057,11 +1171,11 @@ export default function Home() {
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div
-            className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm transition-opacity"
+            className="fixed inset-0 bg-black/55 backdrop-blur-sm transition-opacity"
             onClick={() => setMobileMenuOpen(false)}
           />
           <aside className="fixed inset-y-0 start-0 max-w-xs w-full glass-nav flex flex-col z-50 p-4 shadow-xl">
-            <div className="flex items-center justify-between pb-4 border-b border-sky-100">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-600/50">
               <div className="flex items-center gap-2.5">
                 <div className="p-1 rounded-lg bg-[#0b0b0b] flex items-center justify-center">
                   <img
@@ -1071,13 +1185,13 @@ export default function Home() {
                   />
                 </div>
                 <div>
-                  <div className="font-display font-bold text-slate-800 text-sm">{t('appName')}</div>
-                  <div className="text-[10px] text-mti-600 font-medium">{t('appSubtitle')}</div>
+                  <div className="font-display font-bold text-slate-100 text-sm">{t('appName')}</div>
+                  <div className="text-[10px] text-cyan-300 font-medium">{t('appSubtitle')}</div>
                 </div>
               </div>
               <button
                 onClick={() => setMobileMenuOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800"
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-100"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1096,10 +1210,10 @@ export default function Home() {
                       logger.info('Mobile tab switched', { tab: item.id });
                       if (item.id === 'my-projects' || item.id === 'projects') loadProjects();
                     }}
-                    className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-xs font-medium transition-all ${
+                    className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-semibold transition-all ${
                       isCurrent
                         ? 'nav-item-active'
-                        : 'text-slate-500 hover:text-slate-800 hover:bg-sky-50'
+                        : 'text-slate-500 hover:text-slate-100 hover:bg-slate-700/40'
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -1107,7 +1221,7 @@ export default function Home() {
                       <span>{item.label}</span>
                     </div>
                     {item.badge && item.badge > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-white font-bold text-[10px]">
                         {item.badge}
                       </span>
                     )}
@@ -1116,22 +1230,22 @@ export default function Home() {
               })}
             </div>
 
-            <div className="pt-4 border-t border-sky-100 flex items-center justify-between">
+            <div className="pt-4 border-t border-slate-600/50 flex items-center justify-between">
               <div className="flex items-center gap-2.5 overflow-hidden">
-                <div className="w-8 h-8 rounded-full bg-mti-100 border border-mti-200 flex items-center justify-center font-bold text-xs text-mti-700">
+                <div className="w-8 h-8 rounded-full bg-mti-100 border border-cyan-400/25 flex items-center justify-center font-bold text-xs text-mti-700">
                   {currentUser.firstName[0]}
                   {currentUser.lastName[0]}
                 </div>
                 <div className="truncate text-start">
-                  <div className="text-xs font-semibold text-slate-800 truncate">{currentUser.fullName}</div>
-                  <div className="text-[10px] text-mti-600 truncate">
+                  <div className="text-xs font-semibold text-slate-100 truncate">{currentUser.fullName}</div>
+                  <div className="text-[10px] text-cyan-300 truncate">
                     {currentUser.jobTitle || currentUser.roles.join(', ')}
                   </div>
                 </div>
               </div>
               <button
                 onClick={handleLogout}
-                className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-sky-50"
+                className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-700/40"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -1148,14 +1262,14 @@ export default function Home() {
             {/* Mobile Hamburger Menu Toggle */}
             <button
               onClick={() => setMobileMenuOpen(true)}
-              className="lg:hidden p-2 rounded-xl bg-sky-50 hover:bg-white/[0.08] border border-sky-100 text-slate-600"
+              className="lg:hidden p-2 rounded-xl bg-slate-800/45 hover:bg-slate-700/45 border border-slate-600/50 text-slate-300"
               aria-label="Toggle navigation menu"
             >
               <Menu className="w-5 h-5" />
             </button>
 
             {/* Permanent Top Company Logo & Identity Badge */}
-            <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-2xl bg-white border border-sky-100 shadow-sm backdrop-blur-md flex-shrink-0">
+            <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-2xl bg-slate-800/70 border border-slate-600/50 shadow-sm backdrop-blur-md flex-shrink-0">
               <div className="p-1 rounded-lg bg-[#0b0b0b] flex items-center justify-center">
                 <img
                   src="/images/CompanyLogo.png"
@@ -1163,20 +1277,20 @@ export default function Home() {
                   className="h-8 w-auto object-contain"
                 />
               </div>
-              <div className="hidden sm:block border-l border-sky-100 pl-2.5 rtl:border-l-0 rtl:border-r rtl:pl-0 rtl:pr-2.5">
-                <div className="text-[11px] font-bold text-slate-800 tracking-wide leading-none">{t('appName')}</div>
-                <div className="text-[9px] text-mti-600 font-medium uppercase tracking-wider mt-0.5">{t('portalBadge')}</div>
+              <div className="hidden sm:block border-l border-slate-600/50 pl-2.5 rtl:border-l-0 rtl:border-r rtl:pl-0 rtl:pr-2.5">
+                <div className="text-[11px] font-bold text-slate-100 tracking-wide leading-none">{t('appName')}</div>
+                <div className="text-[9px] text-cyan-300 font-medium uppercase tracking-wider mt-0.5">{t('portalBadge')}</div>
               </div>
             </div>
 
             <form onSubmit={handleGlobalSearch} className="relative max-w-md w-full hidden md:block">
-              <Search className="w-4 h-4 absolute left-3.5 rtl:left-auto rtl:right-3.5 top-2.5 text-slate-500" />
+              <Search className="w-5 h-5 absolute left-3.5 rtl:left-auto rtl:right-3.5 top-1/2 -translate-y-1/2 text-cyan-300" strokeWidth={2.4} />
               <input
                 type="text"
                 value={globalSearchQuery}
                 onChange={(e) => setGlobalSearchQuery(e.target.value)}
                 placeholder={t('searchPlaceholder')}
-                className="field-input w-full pl-10 rtl:pl-4 rtl:pr-10 pr-4 py-2 rounded-xl text-xs"
+                className="field-input w-full pl-11 rtl:pl-4 rtl:pr-11 pr-4 py-2.5 rounded-xl text-sm font-medium text-slate-50 placeholder:text-slate-400 border-cyan-400/40"
               />
             </form>
           </div>
@@ -1185,7 +1299,7 @@ export default function Home() {
             {/* Bilingual Language Switcher Toggle Button */}
             <button
               onClick={toggleLanguage}
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-white/[0.08] border border-sky-100 text-xs font-semibold text-slate-700 transition-colors shadow-sm"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-800/45 hover:bg-slate-700/45 border border-slate-600/50 text-xs font-semibold text-slate-200 transition-colors shadow-sm"
               title={lang === 'ar' ? 'Switch to English' : 'التحويل للغة العربية'}
             >
               <span className="text-sm">{lang === 'ar' ? '🇺🇸' : '🇪🇬'}</span>
@@ -1193,9 +1307,9 @@ export default function Home() {
             </button>
 
             {/* SignalR Connection Status Pill */}
-            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-white border border-sky-100 text-[11px]">
-              <Radio className={`w-3 h-3 ${signalRConnected ? 'text-emerald-600 status-dot-live' : 'text-amber-600'}`} />
-              <span className={`hidden sm:inline ${signalRConnected ? 'text-emerald-600 font-medium' : 'text-amber-600'}`}>
+            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-slate-800/70 border border-slate-600/50 text-[11px]">
+              <Radio className={`w-3 h-3 ${signalRConnected ? 'text-emerald-400 status-dot-live' : 'text-amber-400'}`} />
+              <span className={`hidden sm:inline ${signalRConnected ? 'text-emerald-400 font-medium' : 'text-amber-400'}`}>
                 {signalRConnected ? t('liveSync') : t('connecting')}
               </span>
             </div>
@@ -1207,12 +1321,12 @@ export default function Home() {
                   setShowMessagesDropdown((v) => !v);
                   setShowNotificationsDropdown(false);
                 }}
-                className="p-2.5 rounded-xl bg-white hover:bg-sky-50 border border-sky-100 text-slate-600 relative transition-colors"
+                className="p-2.5 rounded-xl bg-slate-800/70 hover:bg-slate-700/40 border border-slate-600/50 text-slate-300 relative transition-colors"
                 title={t('messagesTitle')}
               >
                 <MessageSquare className="w-4 h-4" strokeWidth={1.8} />
                 {totalUnreadMessages > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-sky-500 text-slate-800 rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-sky-500/50">
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-cyan-500 text-white rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-sky-500/50">
                     {totalUnreadMessages}
                   </span>
                 )}
@@ -1220,13 +1334,13 @@ export default function Home() {
 
               {/* Facebook Messenger Dropdown Popover */}
               {showMessagesDropdown && (
-                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-2xl bg-sky-50 border border-sky-100 shadow-xl backdrop-blur-xl z-50 overflow-hidden animate-fade-up">
-                  <div className="p-3.5 border-b border-sky-100 flex items-center justify-between">
+                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-2xl bg-[#1a2f4a] border-2 border-cyan-400/25 shadow-xl z-50 overflow-hidden animate-fade-up">
+                  <div className="p-3.5 border-b-2 border-cyan-400/20 flex items-center justify-between bg-[#15294a]">
                     <div className="flex items-center gap-2">
-                      <MessageSquare className="w-4 h-4 text-sky-600" />
-                      <span className="font-bold text-slate-800 text-xs">{t('messagesTitle')}</span>
+                      <MessageSquare className="w-4 h-4 text-cyan-300" />
+                      <span className="font-bold text-slate-100 text-xs">{t('messagesTitle')}</span>
                       {totalUnreadMessages > 0 && (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-600 border border-sky-500/30 font-semibold">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500 text-white font-semibold">
                           {totalUnreadMessages} {t('messagesUnread')}
                         </span>
                       )}
@@ -1236,22 +1350,31 @@ export default function Home() {
                         setShowNewChatModal(true);
                         setShowMessagesDropdown(false);
                       }}
-                      className="px-2 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-slate-800 text-[11px] font-semibold transition-colors flex items-center gap-1 shadow-sm"
+                      className="px-2 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-white text-[11px] font-semibold transition-colors flex items-center gap-1 shadow-sm"
                     >
                       <Plus className="w-3 h-3" />
                       {t('startChat')}
                     </button>
                   </div>
 
-                  <div className="max-h-80 overflow-y-auto divide-y divide-sky-100/50">
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-400/40">
                     {conversations.length === 0 ? (
-                      <div className="p-8 text-center text-xs text-slate-500">
-                        <MessageSquare className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
-                        {t('noConversationsFound')}
+                      <div className="p-8 text-center text-xs text-slate-200 space-y-2">
+                        <MessageSquare className="w-8 h-8 text-slate-500 mx-auto opacity-70" />
+                        <p>{t('noConversationsFound')}</p>
+                        <button
+                          onClick={() => {
+                            setShowNewChatModal(true);
+                            setShowMessagesDropdown(false);
+                          }}
+                          className="text-cyan-300 font-semibold hover:underline"
+                        >
+                          {t('startChat')}
+                        </button>
                       </div>
                     ) : (
                       conversations.slice(0, 6).map((c) => {
-                        const otherMember = c.members.find((m) => m.userId !== currentUser.id);
+                        const displayName = getConversationDisplayName(c);
                         return (
                           <div
                             key={c.id}
@@ -1260,26 +1383,26 @@ export default function Home() {
                               setActiveTab('chat');
                               setShowMessagesDropdown(false);
                             }}
-                            className={`p-3.5 hover:bg-sky-50 transition-colors cursor-pointer flex items-center gap-3 ${
-                              c.unreadCount > 0 ? 'bg-sky-500/[0.05]' : ''
+                            className={`p-3.5 hover:bg-cyan-500/15 transition-colors cursor-pointer flex items-center gap-3 ${
+                              c.unreadCount > 0 ? 'bg-cyan-500/10' : 'bg-slate-800/60'
                             }`}
                           >
-                            <div className="w-9 h-9 rounded-full bg-sky-500/20 border border-sky-400/30 flex items-center justify-center font-bold text-xs text-sky-600 flex-shrink-0">
-                              {(otherMember?.userName || 'C')[0]}
+                            <div className="w-9 h-9 rounded-full bg-cyan-500 text-white flex items-center justify-center font-bold text-xs flex-shrink-0">
+                              {displayName[0]}
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-1">
-                                <span className={`font-semibold text-xs truncate ${c.unreadCount > 0 ? 'text-slate-800' : 'text-slate-700'}`}>
-                                  {c.title || otherMember?.userName || 'Direct Chat'}
+                                <span className={`font-bold text-xs truncate ${c.unreadCount > 0 ? 'text-slate-100' : 'text-slate-100'}`}>
+                                  {displayName}
                                 </span>
                                 {c.unreadCount > 0 && (
-                                  <span className="min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-slate-800 text-[9px] font-bold flex items-center justify-center flex-shrink-0">
+                                  <span className="min-w-[16px] h-4 px-1 rounded-full bg-cyan-500 text-white text-[9px] font-bold flex items-center justify-center flex-shrink-0">
                                     {c.unreadCount}
                                   </span>
                                 )}
                               </div>
-                              <p className={`text-[11px] truncate mt-0.5 ${c.unreadCount > 0 ? 'text-sky-200 font-medium' : 'text-slate-400'}`}>
-                                {c.lastMessage?.content || 'No messages yet'}
+                              <p className={`text-[11px] truncate mt-0.5 ${c.unreadCount > 0 ? 'text-cyan-300 font-medium' : 'text-slate-300'}`}>
+                                {c.lastMessage?.content || (lang === 'ar' ? 'لا رسائل بعد' : 'No messages yet')}
                               </p>
                             </div>
                           </div>
@@ -1288,13 +1411,13 @@ export default function Home() {
                     )}
                   </div>
 
-                  <div className="p-2.5 border-t border-sky-100 bg-sky-50/80 text-center">
+                  <div className="p-2.5 border-t-2 border-cyan-400/20 bg-[#15294a] text-center">
                     <button
                       onClick={() => {
                         setActiveTab('chat');
                         setShowMessagesDropdown(false);
                       }}
-                      className="w-full py-2 rounded-xl bg-white hover:bg-slate-100 border border-sky-100 text-sky-600 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                      className="w-full py-2 rounded-xl bg-[#1e334f] hover:bg-cyan-500/15 border border-slate-500/40 text-cyan-300 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
                     >
                       <span>{t('viewAllMessages')}</span>
                       <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />
@@ -1311,23 +1434,23 @@ export default function Home() {
                   setShowNotificationsDropdown((v) => !v);
                   setShowMessagesDropdown(false);
                 }}
-                className="p-2.5 rounded-xl bg-white hover:bg-sky-50 border border-sky-100 text-slate-600 relative transition-colors"
+                className="p-2.5 rounded-xl bg-slate-800/70 hover:bg-slate-700/40 border border-slate-600/50 text-slate-300 relative transition-colors"
                 title={t('navNotifications')}
               >
                 <Bell className="w-4 h-4" strokeWidth={1.8} />
                 {notificationsList.filter((n) => !n.isRead).length > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-rose-500 text-slate-800 rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-rose-500/50">
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-rose-500 text-slate-100 rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-rose-500/50">
                     {notificationsList.filter((n) => !n.isRead).length}
                   </span>
                 )}
               </button>
 
               {showNotificationsDropdown && (
-                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-2xl bg-sky-50 border border-sky-100 shadow-xl backdrop-blur-xl z-50 overflow-hidden animate-fade-up">
-                  <div className="p-3.5 border-b border-sky-100 flex items-center justify-between">
+                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-2xl bg-slate-800/45 border border-slate-600/50 shadow-xl backdrop-blur-xl z-50 overflow-hidden animate-fade-up">
+                  <div className="p-3.5 border-b border-slate-600/50 flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <Bell className="w-4 h-4 text-mti-600" />
-                      <span className="font-bold text-slate-800 text-xs">{t('realTimeNotifications')}</span>
+                      <Bell className="w-4 h-4 text-cyan-300" />
+                      <span className="font-bold text-slate-100 text-xs">{t('realTimeNotifications')}</span>
                     </div>
                     {notificationsList.some((n) => !n.isRead) && (
                       <button
@@ -1335,14 +1458,14 @@ export default function Home() {
                           await notificationService.markAllAsRead();
                           setNotificationsList((prev) => prev.map((n) => ({ ...n, isRead: true })));
                         }}
-                        className="text-[11px] text-mti-600 hover:underline"
+                        className="text-[11px] text-cyan-300 hover:underline"
                       >
                         {t('markAllAsRead')}
                       </button>
                     )}
                   </div>
 
-                  <div className="max-h-72 overflow-y-auto divide-y divide-sky-100/50">
+                  <div className="max-h-72 overflow-y-auto divide-y divide-slate-700/60">
                     {notificationsList.length === 0 ? (
                       <div className="p-8 text-center text-xs text-slate-500">
                         {t('noNotifications')}
@@ -1363,15 +1486,15 @@ export default function Home() {
                             if (n.type === 'NewMessage') setActiveTab('chat');
                             setShowNotificationsDropdown(false);
                           }}
-                          className={`p-3.5 hover:bg-sky-50 transition-colors cursor-pointer flex items-start gap-3 ${
+                          className={`p-3.5 hover:bg-slate-700/40 transition-colors cursor-pointer flex items-start gap-3 ${
                             !n.isRead ? 'bg-mti-500/[0.06]' : ''
                           }`}
                         >
-                          <div className="p-1.5 rounded-lg bg-slate-100 text-mti-600 flex-shrink-0 mt-0.5">
+                          <div className="p-1.5 rounded-lg bg-slate-700/45 text-cyan-300 flex-shrink-0 mt-0.5">
                             <Radio className="w-3.5 h-3.5" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <div className="text-xs font-semibold text-slate-800 truncate">{n.title}</div>
+                            <div className="text-xs font-semibold text-slate-100 truncate">{n.title}</div>
                             <p className="text-[11px] text-slate-400 line-clamp-2 mt-0.5">{n.body}</p>
                             <span className="text-[9px] text-slate-500 mt-1 block">
                               {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1382,13 +1505,13 @@ export default function Home() {
                     )}
                   </div>
 
-                  <div className="p-2.5 border-t border-sky-100 bg-sky-50/80 text-center">
+                  <div className="p-2.5 border-t border-slate-600/50 bg-slate-800/50 text-center">
                     <button
                       onClick={() => {
                         setActiveTab('notifications');
                         setShowNotificationsDropdown(false);
                       }}
-                      className="w-full py-2 rounded-xl bg-white hover:bg-slate-100 border border-sky-100 text-slate-600 text-xs font-semibold transition-colors"
+                      className="w-full py-2 rounded-xl bg-slate-800/70 hover:bg-slate-700/45 border border-slate-600/50 text-slate-300 text-xs font-semibold transition-colors"
                     >
                       {t('navNotifications')}
                     </button>
@@ -1401,14 +1524,14 @@ export default function Home() {
 
         {/* Global Search Results Modal */}
         {searchResults !== null && (
-          <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-start justify-center p-6 pt-20">
-            <div className="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-sky-100 shadow-xl space-y-4 max-h-[80vh] overflow-y-auto">
-              <div className="flex items-center justify-between border-b border-sky-100 pb-3">
-                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                  <Search className="w-4 h-4 text-mti-600" />
+          <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-start justify-center p-6 pt-20">
+            <div className="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl space-y-4 max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-600/50 pb-3">
+                <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                  <Search className="w-4 h-4 text-cyan-300" />
                   Search Results for &ldquo;{globalSearchQuery}&rdquo; ({searchResults.length})
                 </h3>
-                <button onClick={() => setSearchResults(null)} className="text-slate-400 hover:text-slate-800">
+                <button onClick={() => setSearchResults(null)} className="text-slate-400 hover:text-slate-100">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -1423,17 +1546,17 @@ export default function Home() {
                         setSearchResults(null);
                         setDrawerData({ title: item.title, type: item.type, details: item });
                       }}
-                      className="p-3 rounded-xl bg-white border border-sky-100 hover:border-mti-200 cursor-pointer text-xs flex items-center justify-between"
+                      className="p-3 rounded-xl bg-slate-800/70 border border-slate-600/50 hover:border-cyan-400/25 cursor-pointer text-xs flex items-center justify-between"
                     >
                       <div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600 mr-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700/45 text-cyan-300 mr-2">
                           {item.type}
                         </span>
-                        <span className="font-semibold text-slate-800">{item.title}</span>
+                        <span className="font-semibold text-slate-100">{item.title}</span>
                         {item.subtitle && <p className="text-slate-400 text-[11px] mt-0.5">{item.subtitle}</p>}
                       </div>
                       {item.status && (
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-700/45 text-slate-300">
                           {item.status}
                         </span>
                       )}
@@ -1450,14 +1573,14 @@ export default function Home() {
           {/* Skeleton Loader while content switching */}
           {isLoadingContent ? (
             <div className="space-y-4 animate-pulse">
-              <div className="h-8 bg-slate-100 rounded-xl w-1/4"></div>
+              <div className="h-8 bg-slate-700/45 rounded-xl w-1/4"></div>
               <div className="grid grid-cols-4 gap-4">
-                <div className="h-24 bg-slate-100 rounded-2xl"></div>
-                <div className="h-24 bg-slate-100 rounded-2xl"></div>
-                <div className="h-24 bg-slate-100 rounded-2xl"></div>
-                <div className="h-24 bg-slate-100 rounded-2xl"></div>
+                <div className="h-24 bg-slate-700/45 rounded-2xl"></div>
+                <div className="h-24 bg-slate-700/45 rounded-2xl"></div>
+                <div className="h-24 bg-slate-700/45 rounded-2xl"></div>
+                <div className="h-24 bg-slate-700/45 rounded-2xl"></div>
               </div>
-              <div className="h-64 bg-slate-100 rounded-2xl"></div>
+              <div className="h-64 bg-slate-700/45 rounded-2xl"></div>
             </div>
           ) : (
             <>
@@ -1469,7 +1592,7 @@ export default function Home() {
                   <div className="glow-card p-5 rounded-2xl">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <h2 className="font-display text-xl font-bold text-slate-800">
+                        <h2 className="font-display text-xl font-bold text-slate-100">
                           {isAdmin ? t('adminDashboardTitle') : t('engineerDashboardTitle')}
                         </h2>
                         <p className="text-xs text-slate-400 mt-1">
@@ -1481,16 +1604,16 @@ export default function Home() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <button
                             onClick={() => downloadCsv('ProjectData')}
-                            className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-mti-200 text-xs text-slate-600 flex items-center gap-1.5"
+                            className="px-3 py-1.5 rounded-xl bg-slate-800/70 hover:bg-slate-700/45 border border-cyan-400/25 text-xs text-slate-300 flex items-center gap-1.5"
                           >
-                            <Download className="w-3.5 h-3.5 text-mti-600" />
+                            <Download className="w-3.5 h-3.5 text-cyan-300" />
                             {t('exportDataCsv')}
                           </button>
                           <button
                             onClick={() => downloadCsv('Tasks')}
-                            className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-mti-200 text-xs text-slate-600 flex items-center gap-1.5"
+                            className="px-3 py-1.5 rounded-xl bg-slate-800/70 hover:bg-slate-700/45 border border-cyan-400/25 text-xs text-slate-300 flex items-center gap-1.5"
                           >
-                            <Download className="w-3.5 h-3.5 text-mti-600" />
+                            <Download className="w-3.5 h-3.5 text-cyan-300" />
                             {t('exportTasksCsv')}
                           </button>
                         </div>
@@ -1504,34 +1627,34 @@ export default function Home() {
                       <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('totalProjects')}</div>
-                          <div className="kpi-icon text-mti-600"><Briefcase className="w-4 h-4" /></div>
+                          <div className="kpi-icon text-cyan-300"><Briefcase className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-800">{adminStats.totalProjects}</div>
-                        <div className="text-[11px] text-emerald-600 mt-1">{adminStats.activeProjects} {t('activeProjects')}</div>
+                        <div className="font-display text-2xl font-bold text-slate-100">{adminStats.totalProjects}</div>
+                        <div className="text-[11px] text-emerald-400 mt-1">{adminStats.activeProjects} {t('activeProjects')}</div>
                       </div>
                       <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('monitoredSites')}</div>
-                          <div className="kpi-icon text-teal-600"><MapPin className="w-4 h-4" /></div>
+                          <div className="kpi-icon text-teal-400"><MapPin className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-800">{adminStats.totalSites}</div>
-                        <div className="text-[11px] text-mti-600 mt-1">{adminStats.totalEngineers} {t('activeEngineers')}</div>
+                        <div className="font-display text-2xl font-bold text-slate-100">{adminStats.totalSites}</div>
+                        <div className="text-[11px] text-cyan-300 mt-1">{adminStats.totalEngineers} {t('activeEngineers')}</div>
                       </div>
                       <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('pendingApprovals')}</div>
-                          <div className="kpi-icon text-amber-600"><FileCheck className="w-4 h-4" /></div>
+                          <div className="kpi-icon text-amber-400"><FileCheck className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-amber-600">{adminStats.pendingApprovals}</div>
+                        <div className="font-display text-2xl font-bold text-amber-400">{adminStats.pendingApprovals}</div>
                         <div className="text-[11px] text-slate-400 mt-1">{adminStats.approvedData} {t('approvedRecords')}</div>
                       </div>
                       <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('openTasks')}</div>
-                          <div className="kpi-icon text-sky-600"><Activity className="w-4 h-4" /></div>
+                          <div className="kpi-icon text-cyan-400"><Activity className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-800">{adminStats.openTasks}</div>
-                        <div className="text-[11px] text-rose-600 mt-1">{adminStats.overdueTasks} {t('overdueLabel')}</div>
+                        <div className="font-display text-2xl font-bold text-slate-100">{adminStats.openTasks}</div>
+                        <div className="text-[11px] text-rose-400 mt-1">{adminStats.overdueTasks} {t('overdueLabel')}</div>
                       </div>
                     </div>
                   )}
@@ -1541,42 +1664,42 @@ export default function Home() {
                       <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('myAssignedProjects')}</div>
-                          <div className="kpi-icon text-mti-600"><FolderKanban className="w-4 h-4" /></div>
+                          <div className="kpi-icon text-cyan-300"><FolderKanban className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-800">{engineerStats.myProjectsCount}</div>
-                        <div className="text-[11px] text-mti-600 mt-1">{engineerStats.mySitesCount} {t('sitesCount')}</div>
+                        <div className="font-display text-2xl font-bold text-slate-100">{engineerStats.myProjectsCount}</div>
+                        <div className="text-[11px] text-cyan-300 mt-1">{engineerStats.mySitesCount} {t('sitesCount')}</div>
                       </div>
                       <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('myPendingTasks')}</div>
-                          <div className="kpi-icon text-sky-600"><CheckSquare className="w-4 h-4" /></div>
+                          <div className="kpi-icon text-cyan-400"><CheckSquare className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-800">{engineerStats.pendingTasksCount}</div>
-                        <div className="text-[11px] text-emerald-600 mt-1">{engineerStats.completedTasksCount} {t('completedLabel')}</div>
+                        <div className="font-display text-2xl font-bold text-slate-100">{engineerStats.pendingTasksCount}</div>
+                        <div className="text-[11px] text-emerald-400 mt-1">{engineerStats.completedTasksCount} {t('completedLabel')}</div>
                       </div>
                       <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('overdueTasks')}</div>
-                          <div className="kpi-icon text-rose-600"><AlertCircle className="w-4 h-4" /></div>
+                          <div className="kpi-icon text-rose-400"><AlertCircle className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-rose-600">{engineerStats.overdueTasksCount}</div>
+                        <div className="font-display text-2xl font-bold text-rose-400">{engineerStats.overdueTasksCount}</div>
                         <div className="text-[11px] text-slate-400 mt-1">{t('needsAttention')}</div>
                       </div>
                       <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('approvedRecords')}</div>
-                          <div className="kpi-icon text-emerald-600"><FileCheck className="w-4 h-4" /></div>
+                          <div className="kpi-icon text-emerald-400"><FileCheck className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-emerald-600">{engineerStats.approvedDataCount}</div>
-                        <div className="text-[11px] text-amber-600 mt-1">{engineerStats.pendingDataCount} {t('underReview')}</div>
+                        <div className="font-display text-2xl font-bold text-emerald-400">{engineerStats.approvedDataCount}</div>
+                        <div className="text-[11px] text-amber-400 mt-1">{engineerStats.pendingDataCount} {t('underReview')}</div>
                       </div>
                     </div>
                   )}
 
                   {/* Operational Project Monitoring */}
                   <div className="glow-card p-5 rounded-2xl space-y-4">
-                    <h3 className="font-display font-bold text-slate-800 text-sm flex items-center gap-2">
-                      <FolderKanban className="w-4 h-4 text-mti-600" />
+                    <h3 className="font-display font-bold text-slate-100 text-sm flex items-center gap-2">
+                      <FolderKanban className="w-4 h-4 text-cyan-300" />
                       {t('activeMonitoredProjects')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -1590,18 +1713,18 @@ export default function Home() {
                           className="glow-card glow-card-hover p-4 rounded-xl cursor-pointer space-y-2"
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-mti-50 text-mti-600">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-mti-50 text-cyan-300">
                               {p.code}
                             </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-600">
+                            <span className="text-[10px] px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-400">
                               {p.status === 'Active' ? t('activeLabel') : p.status}
                             </span>
                           </div>
-                          <div className="font-semibold text-slate-800 text-sm">{p.name}</div>
+                          <div className="font-semibold text-slate-100 text-sm">{p.name}</div>
                           <div className="text-xs text-slate-400">{p.clientName}</div>
-                          <div className="text-[11px] text-slate-500 pt-2 border-t border-sky-100 flex items-center justify-between gap-2">
+                          <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-600/50 flex items-center justify-between gap-2">
                             <span>{p.totalSitesCount} {t('sitesMonitored')}</span>
-                            <span className="text-mti-600 flex items-center gap-0.5 font-medium">
+                            <span className="text-cyan-300 flex items-center gap-0.5 font-medium">
                               {t('inspect')} <ChevronRight className={`w-3 h-3 ${lang === 'ar' ? 'rotate-180' : ''}`} />
                             </span>
                           </div>
@@ -1619,7 +1742,7 @@ export default function Home() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-1 glow-card p-4 rounded-2xl space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-slate-800">{t('projectsRoster')}</h3>
+                      <h3 className="text-sm font-bold text-slate-100">{t('projectsRoster')}</h3>
                       {isAdmin && (
                         <button
                           onClick={() => setShowNewProjectModal(true)}
@@ -1638,19 +1761,19 @@ export default function Home() {
                           onClick={() => selectProject(proj.id)}
                           className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                             selectedProjectId === proj.id
-                              ? 'bg-white border-mti-500 shadow-lg shadow-mti-200/40'
-                              : 'bg-white/80 border-sky-100 hover:border-sky-200'
+                              ? 'bg-slate-800/70 border-cyan-400 shadow-lg shadow-cyan-500/20'
+                              : 'bg-slate-800/75 border-slate-600/50 hover:border-slate-500/40'
                           }`}
                         >
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700/45 text-cyan-300">
                               {proj.code}
                             </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-emerald-600">
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-700/45 text-emerald-400">
                               {proj.status}
                             </span>
                           </div>
-                          <div className="font-semibold text-slate-800 text-sm mt-1">{proj.name}</div>
+                          <div className="font-semibold text-slate-100 text-sm mt-1">{proj.name}</div>
                           <div className="text-xs text-slate-400 mt-0.5">{proj.clientName}</div>
                         </div>
                       ))}
@@ -1658,41 +1781,41 @@ export default function Home() {
                   </div>
 
                   <div className="lg:col-span-2 glow-card p-4 rounded-2xl space-y-4">
-                    <h3 className="text-sm font-bold text-slate-800">{t('sitesUnderProject')}</h3>
+                    <h3 className="text-sm font-bold text-slate-100">{t('sitesUnderProject')}</h3>
                     {loadingSites ? (
                       <div className="p-8 text-center text-xs text-slate-500">{t('loading')}</div>
                     ) : selectedProjectSites.length === 0 ? (
-                      <div className="p-8 rounded-2xl bg-white/80 border border-sky-100 text-center text-xs text-slate-400">
+                      <div className="p-8 rounded-2xl bg-slate-800/75 border border-slate-600/50 text-center text-xs text-slate-400">
                         {t('noSitesYet')}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {selectedProjectSites.map((site) => (
-                          <div key={site.id} className="p-4 rounded-xl bg-white border border-sky-100 space-y-2">
+                          <div key={site.id} className="p-4 rounded-xl bg-slate-800/70 border border-slate-600/50 space-y-2">
                             <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-600">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
                                 {site.code}
                               </span>
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">{site.status}</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-700/45 text-slate-300">{site.status}</span>
                             </div>
-                            <div className="font-semibold text-slate-800 text-sm">{site.name}</div>
+                            <div className="font-semibold text-slate-100 text-sm">{site.name}</div>
                             <p className="text-xs text-slate-400">{site.description}</p>
                             <div className="text-[11px] text-slate-400 flex items-center gap-1">
                               <MapPin className="w-3 h-3 text-slate-500" />
                               <span>{site.address || 'GPS Coordinates Set'}</span>
                             </div>
 
-                            <div className="mt-3 pt-2 border-t border-sky-100 text-[11px]">
+                            <div className="mt-3 pt-2 border-t border-slate-600/50 text-[11px]">
                               <div className="text-slate-400 font-medium mb-1">{t('assignedEngineers')}:</div>
                               {site.assignments && site.assignments.length > 0 ? (
                                 <div className="space-y-1">
                                   {site.assignments.map((a) => (
                                     <div
                                       key={a.id}
-                                      className="flex items-center justify-between text-slate-600 bg-slate-50/80 px-2 py-1 rounded-md border border-sky-100"
+                                      className="flex items-center justify-between text-slate-300 bg-slate-800/55/80 px-2 py-1 rounded-md border border-slate-600/50"
                                     >
                                       <span>{a.engineerName}</span>
-                                      <span className="text-[10px] text-mti-600 font-medium">{a.role}</span>
+                                      <span className="text-[10px] text-cyan-300 font-medium">{a.role}</span>
                                     </div>
                                   ))}
                                 </div>
@@ -1715,17 +1838,17 @@ export default function Home() {
                 <div className="space-y-4">
                   <div className="glow-card p-4 rounded-2xl flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-800">{t('approvalCenterTitle')}</h3>
+                      <h3 className="text-sm font-bold text-slate-100">{t('approvalCenterTitle')}</h3>
                       <p className="text-xs text-slate-400">{t('approvalCenterSubtitle')}</p>
                     </div>
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-200 whitespace-nowrap">
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 whitespace-nowrap">
                       {pendingRecords.length} {t('pendingReview')}
                     </span>
                   </div>
 
                   {pendingRecords.length === 0 ? (
                     <div className="glow-card p-12 text-center rounded-2xl text-xs text-slate-400">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+                      <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
                       {t('allReviewed')}
                     </div>
                   ) : (
@@ -1735,37 +1858,37 @@ export default function Home() {
                           <div className="flex items-start justify-between">
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
                                   {r.category}
                                 </span>
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-400">v{r.version}</span>
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-700/45 text-slate-400">v{r.version}</span>
                               </div>
-                              <h4 className="font-semibold text-slate-800 text-sm mt-1">{r.title}</h4>
+                              <h4 className="font-semibold text-slate-100 text-sm mt-1">{r.title}</h4>
                               <div className="text-xs text-slate-400 mt-0.5">
-                                Project: <span className="text-slate-700">{r.projectName}</span> &bull; Site:{' '}
-                                <span className="text-slate-700">{r.siteName}</span>
+                                Project: <span className="text-slate-200">{r.projectName}</span> &bull; Site:{' '}
+                                <span className="text-slate-200">{r.siteName}</span>
                               </div>
                             </div>
 
                             <div className="text-right text-xs text-slate-400">
-                              <div>{t('submittedBy')}: <span className="text-slate-800 font-medium">{r.submitterName}</span></div>
+                              <div>{t('submittedBy')}: <span className="text-slate-100 font-medium">{r.submitterName}</span></div>
                               <div className="text-[11px] text-slate-500">{new Date(r.createdAt).toLocaleString()}</div>
                             </div>
                           </div>
 
                           {r.dataPayloadJson && (
-                            <div className="p-3 rounded-xl bg-sky-50 border border-sky-100 text-xs font-mono text-emerald-600 overflow-x-auto">
+                            <div className="p-3 rounded-xl bg-slate-800/45 border border-slate-600/50 text-xs font-mono text-emerald-400 overflow-x-auto">
                               <pre>{r.dataPayloadJson}</pre>
                             </div>
                           )}
 
-                          <div className="pt-2 border-t border-sky-100 flex items-center justify-between gap-4">
+                          <div className="pt-2 border-t border-slate-600/50 flex items-center justify-between gap-4">
                             <input
                               type="text"
                               value={approvalComment}
                               onChange={(e) => setApprovalComment(e.target.value)}
                               placeholder={t('commentsPlaceholder')}
-                              className="flex-1 px-3 py-1.5 bg-white border border-sky-100 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-mti-500"
+                              className="flex-1 px-3 py-1.5 bg-slate-800/70 border border-slate-600/50 rounded-xl text-xs text-slate-100 focus:outline-none focus:border-cyan-400"
                             />
 
                             <div className="flex items-center gap-2">
@@ -1803,13 +1926,13 @@ export default function Home() {
                 <div className="space-y-6">
                   {!isAdmin && (
                     <div className="glow-card p-6 rounded-2xl space-y-4">
-                      <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                        <Upload className="w-4 h-4 text-mti-600" />
+                      <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                        <Upload className="w-4 h-4 text-cyan-300" />
                         {t('submitDataTitle')}
                       </h3>
 
                       {submitSuccess && (
-                        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-600 text-xs flex items-center gap-2">
+                        <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
                           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                           <span>{submitSuccess}</span>
                         </div>
@@ -1818,11 +1941,11 @@ export default function Home() {
                       <form onSubmit={handleSubmitData} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">{t('targetProject')}</label>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">{t('targetProject')}</label>
                             <select
                               value={selectedProjectId || ''}
                               onChange={(e) => selectProject(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                              className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                             >
                               {projects.map((p) => (
                                 <option key={p.id} value={p.id}>
@@ -1833,11 +1956,11 @@ export default function Home() {
                           </div>
 
                           <div>
-                            <label className="block text-xs font-semibold text-slate-600 mb-1">{t('dataCategory')}</label>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">{t('dataCategory')}</label>
                             <select
                               value={submitCategory}
                               onChange={(e) => setSubmitCategory(e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                              className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                             >
                               <option value="DailyReport">Daily Report</option>
                               <option value="SiteReport">Site Report</option>
@@ -1850,31 +1973,31 @@ export default function Home() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-slate-600 mb-1">{t('submissionTitle')}</label>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">{t('submissionTitle')}</label>
                           <input
                             type="text"
                             value={submitTitle}
                             onChange={(e) => setSubmitTitle(e.target.value)}
                             placeholder="e.g. Soil Foundation Settlement - Sector A"
                             required
-                            className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                            className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-slate-600 mb-1">{t('dataPayload')}</label>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">{t('dataPayload')}</label>
                           <textarea
                             value={submitPayload}
                             onChange={(e) => setSubmitPayload(e.target.value)}
                             rows={4}
-                            className="w-full px-3 py-2 bg-white border border-sky-100 rounded-xl font-mono text-xs text-emerald-600"
+                            className="w-full px-3 py-2 bg-slate-800/70 border border-slate-600/50 rounded-xl font-mono text-xs text-emerald-400"
                           />
                         </div>
 
                         {/* File Upload Dropzone (Prompt 20) */}
-                        <div className="border-2 border-dashed border-sky-100 hover:border-mti-300 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-50/70">
+                        <div className="border-2 border-dashed border-slate-600/50 hover:border-mti-300 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-800/55/70">
                           <Upload className="w-6 h-6 text-slate-500 mx-auto mb-1" />
-                          <div className="text-xs text-slate-600 font-medium">{t('attachFiles')}</div>
+                          <div className="text-xs text-slate-300 font-medium">{t('attachFiles')}</div>
                           <div className="text-[10px] text-slate-500 mt-0.5">{t('attachSubtext')}</div>
                         </div>
 
@@ -1893,33 +2016,33 @@ export default function Home() {
 
                   {/* Approved Records (Immutable) */}
                   <div className="glow-card p-5 rounded-2xl space-y-3">
-                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                      <FileCheck className="w-4 h-4 text-emerald-600" />
+                    <h3 className="font-bold text-slate-100 text-sm flex items-center gap-2">
+                      <FileCheck className="w-4 h-4 text-emerald-400" />
                       {t('approvedHistoryTitle')}
                     </h3>
 
                     {approvedRecords.length === 0 ? (
                       <p className="text-xs text-slate-500 py-4 text-center">{t('noApprovedRecords')}</p>
                     ) : (
-                      <div className="divide-y divide-sky-100">
+                      <div className="divide-y divide-slate-700/60">
                         {(Array.isArray(approvedRecords) ? approvedRecords : []).map((r) => (
                           <div
                             key={r.id}
                             onClick={() => setDrawerData({ title: r.title, type: 'Approved Data', details: r })}
-                            className="py-3 flex items-center justify-between hover:bg-white/80 px-2 rounded-lg cursor-pointer"
+                            className="py-3 flex items-center justify-between hover:bg-slate-800/75 px-2 rounded-lg cursor-pointer"
                           >
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-600">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
                                   {r.category}
                                 </span>
-                                <span className="font-semibold text-slate-800 text-xs">{r.title}</span>
+                                <span className="font-semibold text-slate-100 text-xs">{r.title}</span>
                               </div>
                               <div className="text-[11px] text-slate-400 mt-0.5">
                                 Submitter: {r.submitterName} &bull; Approved: {r.approvedAt ? new Date(r.approvedAt).toLocaleDateString() : 'N/A'}
                               </div>
                             </div>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-emerald-600 font-medium">
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-700/45 text-emerald-400 font-medium">
                               Immutable (v{r.version})
                             </span>
                           </div>
@@ -1937,7 +2060,7 @@ export default function Home() {
                 <div className="space-y-4">
                   <div className="glow-card p-4 rounded-2xl flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-800">{t('tasksBoardTitle')}</h3>
+                      <h3 className="text-sm font-bold text-slate-100">{t('tasksBoardTitle')}</h3>
                       <p className="text-xs text-slate-400">{t('tasksBoardSubtitle')}</p>
                     </div>
 
@@ -1956,34 +2079,34 @@ export default function Home() {
                     {(Array.isArray(tasks) ? tasks : []).map((task) => (
                       <div key={task.id} className="glow-card p-4 rounded-xl space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700/45 text-cyan-300">
                             {task.taskNumber}
                           </span>
                           <span
                             className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
                               task.priority === 'Urgent' || task.priority === 'High'
-                                ? 'bg-rose-50 text-rose-600'
-                                : 'bg-slate-100 text-slate-600'
+                                ? 'bg-rose-500/15 text-rose-400'
+                                : 'bg-slate-700/45 text-slate-300'
                             }`}
                           >
                             {task.priority}
                           </span>
                         </div>
 
-                        <div className="font-semibold text-slate-800 text-sm">{task.title}</div>
+                        <div className="font-semibold text-slate-100 text-sm">{task.title}</div>
                         <div className="text-xs text-slate-400">
-                          Project: <span className="text-slate-600">{task.projectName || 'Active'}</span>
+                          Project: <span className="text-slate-300">{task.projectName || 'Active'}</span>
                         </div>
 
-                        <div className="pt-2 border-t border-sky-100 flex items-center justify-between">
+                        <div className="pt-2 border-t border-slate-600/50 flex items-center justify-between">
                           <div className="text-[11px] text-slate-400">
-                            Assigned: <span className="text-slate-800 font-medium">{task.assignedToName || 'Field Engineer'}</span>
+                            Assigned: <span className="text-slate-100 font-medium">{task.assignedToName || 'Field Engineer'}</span>
                           </div>
 
                           <select
                             value={task.status}
                             onChange={(e) => handleTaskStatusChange(task.id, e.target.value)}
-                            className="px-2 py-1 bg-white border border-sky-100 rounded-lg text-xs text-slate-700"
+                            className="px-2 py-1 bg-slate-800/70 border border-slate-600/50 rounded-lg text-xs text-slate-200"
                           >
                             <option value="ToDo">To Do</option>
                             <option value="InProgress">In Progress</option>
@@ -2002,180 +2125,303 @@ export default function Home() {
               {/* ======================================================== */}
               {/* VIEW: CHAT & WHATSAPP MESSAGE STATUSES */}
               {activeTab === 'chat' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6 h-[700px] glass-panel rounded-2xl border border-sky-100 overflow-hidden shadow-xl">
-                  {/* Left Conversations Pane */}
-                  <div className="md:col-span-1 border-r border-sky-100 flex flex-col bg-sky-50/50">
-                    <div className="p-3.5 border-b border-sky-100 flex items-center justify-between">
-                      <div>
-                        <h3 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                          <MessageCircle className="w-4 h-4 text-sky-600" />
-                          <span>{t('conversations')}</span>
-                        </h3>
-                        <span className="text-[10px] text-slate-400">
-                          {conversations.length} {lang === 'ar' ? 'محادثات نشطة' : 'active chats'}
-                        </span>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-0 h-[720px] rounded-2xl border-2 border-cyan-400/25 overflow-hidden shadow-xl bg-[#0f1c30]">
+                  {/* Conversations list (by name) */}
+                  <div className="md:col-span-1 border-e-2 border-slate-500/40 flex flex-col bg-[#132238]">
+                    <div className="p-3.5 border-b-2 border-cyan-400/20 space-y-3 bg-[#15294a]">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <h3 className="font-bold text-slate-100 text-sm flex items-center gap-1.5">
+                            <MessageCircle className="w-4 h-4 text-cyan-300" />
+                            <span>{t('conversations')}</span>
+                          </h3>
+                          <span className="text-[10px] text-slate-200 font-medium">
+                            {conversations.length}{' '}
+                            {lang === 'ar' ? 'محادثة محفوظة' : 'saved chats'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => setShowNewChatModal(true)}
+                          className="px-2.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-semibold flex items-center gap-1 transition-colors shadow-md"
+                          title={t('startChat')}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{lang === 'ar' ? 'جديد' : 'New'}</span>
+                        </button>
                       </div>
-                      <button
-                        onClick={() => setShowNewChatModal(true)}
-                        className="px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-slate-800 text-xs font-semibold flex items-center gap-1 transition-colors shadow-sm"
-                        title={t('startChat')}
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>{t('startChat')}</span>
-                      </button>
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 text-slate-300 absolute start-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={chatListSearch}
+                          onChange={(e) => setChatListSearch(e.target.value)}
+                          placeholder={t('searchChannels')}
+                          className="w-full ps-8 pe-3 py-2 rounded-xl bg-[#1e334f] border-2 border-cyan-400/25 text-xs text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-cyan-400"
+                        />
+                      </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                      {conversations.length === 0 ? (
-                        <div className="p-8 text-center text-xs text-slate-500 space-y-2">
-                          <MessageSquare className="w-8 h-8 text-slate-600 mx-auto opacity-50" />
-                          <p>{t('noConversationsFound')}</p>
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                      {filteredConversations.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-slate-200 space-y-3">
+                          <MessageSquare className="w-9 h-9 text-slate-300 mx-auto opacity-70" />
+                          <p className="font-medium">{t('noConversationsFound')}</p>
+                          <p className="text-[11px] text-slate-300 leading-relaxed">
+                            {lang === 'ar'
+                              ? 'ابدأ محادثة جديدة مع زميل، وهتتحفظ باسمه هنا عشان ترجع لها في أي وقت.'
+                              : 'Start a chat with a colleague — it will be saved here by name.'}
+                          </p>
                           <button
                             onClick={() => setShowNewChatModal(true)}
-                            className="text-xs text-sky-600 font-semibold hover:underline"
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-semibold shadow-sm"
                           >
+                            <Plus className="w-3.5 h-3.5" />
                             {t('startChat')}
                           </button>
                         </div>
                       ) : (
-                        conversations.map((c) => {
-                          const otherMember = c.members.find((m) => m.userId !== currentUser.id);
+                        filteredConversations.map((c) => {
+                          const displayName = getConversationDisplayName(c);
                           const isSelected = activeConversation?.id === c.id;
+                          const other = getOtherMember(c);
+                          const presence = getMemberPresence(other);
+                          const ticks = getLastMessageTicks(c);
                           return (
-                            <div
+                            <button
                               key={c.id}
+                              type="button"
                               onClick={() => openConversation(c)}
-                              className={`p-3 rounded-xl cursor-pointer transition-all flex items-center gap-3 ${
+                              className={`w-full text-start p-3 rounded-xl transition-all flex items-center gap-3 border-2 ${
                                 isSelected
-                                  ? 'bg-sky-600/20 border border-sky-500/40 text-slate-800 shadow-sm'
-                                  : 'hover:bg-slate-50 text-slate-600 border border-transparent'
+                                  ? 'bg-cyan-700/90 border-cyan-400 text-white shadow-md shadow-cyan-500/20'
+                                  : 'bg-[#1a2f4a] border-cyan-400/25 text-slate-100 hover:bg-[#243b58] hover:border-cyan-400/45'
                               }`}
                             >
-                              <div className="w-9 h-9 rounded-full bg-sky-500/20 border border-sky-400/30 flex items-center justify-center font-bold text-xs text-sky-600 flex-shrink-0">
-                                {(otherMember?.userName || 'C')[0]}
+                              <div className="relative flex-shrink-0">
+                                <div
+                                  className={`w-11 h-11 rounded-full flex items-center justify-center font-bold text-sm ${
+                                    isSelected
+                                      ? 'bg-white/20 text-white border border-white/30'
+                                      : 'bg-cyan-500/20 border border-cyan-400/40 text-cyan-200'
+                                  }`}
+                                >
+                                  {displayName[0]}
+                                </div>
+                                <span
+                                  className={`absolute -bottom-0.5 -end-0.5 w-3 h-3 rounded-full border-2 ${
+                                    isSelected ? 'border-cyan-700' : 'border-[#1a2f4a]'
+                                  } ${presence.isOnline ? 'bg-emerald-400' : 'bg-slate-500'}`}
+                                  title={formatLastSeen(presence.lastSeenAt, presence.isOnline)}
+                                />
                               </div>
                               <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between">
-                                  <span className="font-semibold text-xs text-slate-800 truncate">
-                                    {c.title || otherMember?.userName || 'Direct Chat'}
+                                <div className="flex items-center justify-between gap-2">
+                                  <span
+                                    className={`font-bold text-sm truncate ${
+                                      isSelected ? 'text-white' : 'text-slate-50'
+                                    }`}
+                                  >
+                                    {displayName}
                                   </span>
                                   {c.unreadCount > 0 && (
-                                    <span className="px-1.5 py-0.5 rounded-full bg-sky-500 text-slate-800 text-[10px] font-bold">
+                                    <span
+                                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 ${
+                                        isSelected
+                                          ? 'bg-white text-cyan-800'
+                                          : 'bg-cyan-500 text-white'
+                                      }`}
+                                    >
                                       {c.unreadCount}
                                     </span>
                                   )}
                                 </div>
-                                <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                                  {c.lastMessage?.content || 'No messages yet'}
+                                <div
+                                  className={`text-xs truncate mt-0.5 flex items-center gap-1.5 ${
+                                    isSelected ? 'text-cyan-50' : 'text-slate-200'
+                                  }`}
+                                >
+                                  {ticks && (
+                                    <span className="inline-flex flex-shrink-0" title={
+                                      ticks === 'read' ? t('chatStatusRead')
+                                        : ticks === 'delivered' ? t('chatStatusDelivered')
+                                        : ticks === 'sending' ? t('chatStatusSending')
+                                        : ticks === 'failed' ? t('chatStatusFailed')
+                                        : t('chatStatusSent')
+                                    }>
+                                      {ticks === 'sending' ? (
+                                        <Clock className={`w-3.5 h-3.5 ${isSelected ? 'text-cyan-100' : 'text-slate-400'}`} />
+                                      ) : ticks === 'failed' ? (
+                                        <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                                      ) : ticks === 'read' ? (
+                                        <CheckCheck className={`w-3.5 h-3.5 ${isSelected ? 'text-sky-200' : 'text-cyan-300'}`} />
+                                      ) : ticks === 'delivered' ? (
+                                        <CheckCheck className={`w-3.5 h-3.5 ${isSelected ? 'text-white/80' : 'text-slate-300'}`} />
+                                      ) : (
+                                        <Check className={`w-3.5 h-3.5 ${isSelected ? 'text-white/70' : 'text-slate-400'}`} />
+                                      )}
+                                    </span>
+                                  )}
+                                  <span className="truncate">
+                                    {c.lastMessage?.content ||
+                                      (lang === 'ar' ? 'لا رسائل بعد' : 'No messages yet')}
+                                  </span>
+                                </div>
+                                <div
+                                  className={`text-[11px] mt-0.5 font-medium ${
+                                    isSelected
+                                      ? presence.isOnline
+                                        ? 'text-emerald-200'
+                                        : 'text-cyan-100/80'
+                                      : presence.isOnline
+                                        ? 'text-emerald-400'
+                                        : 'text-slate-400'
+                                  }`}
+                                >
+                                  {presence.isOnline
+                                    ? t('online')
+                                    : `${t('lastSeen')}: ${formatLastSeen(presence.lastSeenAt, false)}`}
                                 </div>
                               </div>
-                            </div>
+                            </button>
                           );
                         })
                       )}
                     </div>
                   </div>
 
-                  {/* Right Message Stream Pane */}
-                  <div className="md:col-span-2 flex flex-col bg-sky-50/60">
+                  {/* Message stream */}
+                  <div className="md:col-span-2 flex flex-col bg-[#15253c]">
                     {activeConversation ? (
                       <>
-                        {/* Conversation Top Header */}
-                        <div className="p-3.5 border-b border-sky-100 flex items-center justify-between bg-white/80">
+                        <div className="p-3.5 border-b-2 border-cyan-400/20 flex items-center justify-between bg-[#15294a]">
                           <div className="flex items-center gap-3">
-                            <div className="w-9 h-9 rounded-full bg-sky-500/20 border border-sky-400/30 flex items-center justify-center font-bold text-xs text-sky-600">
-                              {(activeConversation.title ||
-                                activeConversation.members.find((m) => m.userId !== currentUser.id)?.userName ||
-                                'C')[0]}
+                            <div className="relative">
+                              <div className="w-11 h-11 rounded-full bg-cyan-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
+                                {getConversationDisplayName(activeConversation)[0]}
+                              </div>
+                              {(() => {
+                                const p = getMemberPresence(getOtherMember(activeConversation));
+                                return (
+                                  <span
+                                    className={`absolute -bottom-0.5 -end-0.5 w-3 h-3 rounded-full border-2 border-[#15294a] ${
+                                      p.isOnline ? 'bg-emerald-400' : 'bg-slate-500'
+                                    }`}
+                                  />
+                                );
+                              })()}
                             </div>
                             <div>
-                              <h4 className="font-bold text-slate-800 text-xs">
-                                {activeConversation.title ||
-                                  activeConversation.members.find((m) => m.userId !== currentUser.id)?.userName ||
-                                  'Direct Chat'}
+                              <h4 className="font-bold text-slate-50 text-base">
+                                {getConversationDisplayName(activeConversation)}
                               </h4>
-                              <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                <span>{t('online')}</span>
-                                <span>&bull;</span>
-                                <span className="font-mono text-[9px] text-sky-600">SignalR Real-Time Sync</span>
+                              <div className="text-xs text-slate-200 flex items-center gap-1.5 mt-0.5 font-medium">
+                                {(() => {
+                                  const p = getMemberPresence(getOtherMember(activeConversation));
+                                  return (
+                                    <>
+                                      <span
+                                        className={`w-1.5 h-1.5 rounded-full ${
+                                          p.isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
+                                        }`}
+                                      />
+                                      <span className={p.isOnline ? 'text-emerald-400' : 'text-slate-300'}>
+                                        {p.isOnline
+                                          ? t('online')
+                                          : `${t('lastSeen')}: ${formatLastSeen(p.lastSeenAt, false)}`}
+                                      </span>
+                                    </>
+                                  );
+                                })()}
                               </div>
                             </div>
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowNewChatModal(true)}
+                            className="px-2.5 py-1.5 rounded-xl bg-[#1e334f] hover:bg-cyan-500/15 border border-cyan-400/30 text-cyan-200 text-xs font-semibold flex items-center gap-1"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            {lang === 'ar' ? 'شخص جديد' : 'New person'}
+                          </button>
                         </div>
 
-                        {/* Messages Stream */}
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#112033]">
+                          {chatMessages.length === 0 && (
+                            <div className="h-full min-h-[200px] flex items-center justify-center text-xs text-slate-300">
+                              {lang === 'ar'
+                                ? 'ابدأ الكتابة في الحقل بالأسفل…'
+                                : 'Start typing in the box below…'}
+                            </div>
+                          )}
                           {chatMessages.map((m) => {
                             const isMe = m.senderUserId === currentUser.id;
                             const isRead =
                               (m.readStates && m.readStates.some((rs) => rs.userId !== currentUser.id)) ||
                               m.deliveryStatus === 'read';
                             const isDelivered =
-                              isRead || m.isDelivered || deliveredMessageIds.has(m.id) || m.deliveryStatus === 'delivered';
+                              isRead ||
+                              m.isDelivered ||
+                              deliveredMessageIds.has(m.id) ||
+                              m.deliveryStatus === 'delivered';
 
                             return (
                               <div key={m.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                                <div className="text-[10px] text-slate-500 mb-0.5 px-1">{m.senderName}</div>
+                                <div className="text-[10px] text-slate-200 mb-0.5 px-1 font-medium">
+                                  {m.senderName}
+                                </div>
                                 <div
                                   className={`p-3 rounded-2xl max-w-sm sm:max-w-md text-xs space-y-1.5 shadow-md ${
                                     isMe
-                                      ? 'bg-sky-600 text-white rounded-br-xs'
-                                      : 'bg-white border border-sky-100 text-slate-800 rounded-bl-xs'
+                                      ? 'bg-cyan-500 text-white rounded-br-sm'
+                                      : 'bg-[#243b58] border-2 border-cyan-400/20 text-slate-100 rounded-bl-sm'
                                   }`}
                                 >
                                   <p className="leading-relaxed break-words">{m.content}</p>
-                                  {m.isEdited && <span className="text-[9px] opacity-70 italic block">(edited)</span>}
-
-                                  {/* WhatsApp Style Timestamp & Delivery Checkmarks */}
+                                  {m.isEdited && (
+                                    <span className="text-[9px] opacity-70 italic block">(edited)</span>
+                                  )}
                                   <div
                                     className={`flex items-center gap-1 text-[10px] ${
-                                      isMe ? 'justify-end text-sky-100/70' : 'justify-end text-slate-400'
+                                      isMe ? 'justify-end text-cyan-50' : 'justify-end text-slate-500'
                                     }`}
                                   >
                                     <span>
-                                      {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      {new Date(m.createdAt).toLocaleTimeString([], {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
                                     </span>
                                     {isMe && (
-                                      <span className="inline-flex items-center ml-0.5">
+                                      <span className="inline-flex items-center ms-0.5">
                                         {m.deliveryStatus === 'sending' ? (
-                                          <span title={t('chatStatusSending')} className="inline-flex items-center">
-                                            <Clock className="w-3 h-3 text-slate-600 animate-spin" />
-                                          </span>
+                                          <Clock className="w-3 h-3 text-cyan-100 animate-spin" />
                                         ) : m.deliveryStatus === 'failed' ? (
-                                          <span
-                                            onClick={() => handleSendMessage({ preventDefault: () => {} } as any)}
-                                            title={t('chatStatusFailed')}
-                                            className="inline-flex items-center cursor-pointer text-rose-600"
-                                          >
-                                            <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-                                          </span>
+                                          <AlertCircle
+                                            className="w-3.5 h-3.5 text-rose-200 cursor-pointer"
+                                            onClick={() =>
+                                              handleSendMessage({ preventDefault: () => {} } as any)
+                                            }
+                                          />
                                         ) : isRead ? (
-                                          <span title={t('chatStatusRead')} className="inline-flex items-center">
-                                            <CheckCheck className="w-3.5 h-3.5 text-sky-600 filter drop-shadow-[0_0_4px_rgba(56,189,248,0.9)]" />
-                                          </span>
+                                          <CheckCheck className="w-3.5 h-3.5 text-cyan-100" />
                                         ) : isDelivered ? (
-                                          <span title={t('chatStatusDelivered')} className="inline-flex items-center">
-                                            <CheckCheck className="w-3.5 h-3.5 text-slate-600" />
-                                          </span>
+                                          <CheckCheck className="w-3.5 h-3.5 text-cyan-100/80" />
                                         ) : (
-                                          <span title={t('chatStatusSent')} className="inline-flex items-center">
-                                            <Check className="w-3.5 h-3.5 text-slate-600" />
-                                          </span>
+                                          <Check className="w-3.5 h-3.5 text-cyan-100/70" />
                                         )}
                                       </span>
                                     )}
                                   </div>
                                 </div>
-
-                                {/* Reactions */}
                                 <div className="flex items-center gap-2 mt-1 px-1">
                                   <button
                                     onClick={() => handleToggleReaction(m.id, 'thumbs_up')}
-                                    className="text-[10px] text-slate-500 hover:text-amber-600 flex items-center gap-1 transition-colors"
+                                    className="text-[10px] text-slate-300 hover:text-amber-700 flex items-center gap-1"
                                   >
                                     <ThumbsUp className="w-3 h-3" />
-                                    {m.reactions && m.reactions.length > 0 && <span>{m.reactions.length}</span>}
+                                    {m.reactions && m.reactions.length > 0 && (
+                                      <span>{m.reactions.length}</span>
+                                    )}
                                   </button>
                                 </div>
                               </div>
@@ -2183,32 +2429,44 @@ export default function Home() {
                           })}
                         </div>
 
-                        {/* Send Message Form */}
-                        <form onSubmit={handleSendMessage} className="p-3 border-t border-sky-100 flex items-center gap-2 bg-white/30">
+                        <form
+                          onSubmit={handleSendMessage}
+                          className="p-3 border-t-2 border-slate-500/40 flex items-center gap-2 bg-[#15294a]"
+                        >
                           <input
                             type="text"
                             value={newMessageText}
                             onChange={(e) => setNewMessageText(e.target.value)}
                             placeholder={t('typeMessagePlaceholder')}
-                            className="flex-1 px-3.5 py-2.5 bg-white border border-sky-100 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-sky-500 transition-colors"
+                            className="flex-1 px-4 py-3 bg-[#1a2d45] border-2 border-cyan-400/35 rounded-xl text-sm text-slate-100 placeholder:text-slate-400 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/25 shadow-inner"
                           />
                           <button
                             type="submit"
-                            className="p-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-slate-800 transition-colors shadow-sm flex-shrink-0"
+                            className="p-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white transition-colors shadow-md flex-shrink-0"
                             title={t('send')}
                           >
-                            <Send className="w-4 h-4" />
+                            <Send className="w-5 h-5" />
                           </button>
                         </form>
                       </>
                     ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-slate-500 space-y-3">
-                        <MessageSquare className="w-12 h-12 text-slate-600 opacity-40 mx-auto" />
-                        <p>{t('noConversationsFound')}</p>
+                      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4 bg-[#112033]">
+                        <MessageSquare className="w-14 h-14 text-slate-500 opacity-60" />
+                        <div className="space-y-1.5 max-w-sm">
+                          <p className="text-sm font-bold text-slate-100">
+                            {lang === 'ar' ? 'اختر محادثة من القائمة' : 'Pick a conversation'}
+                          </p>
+                          <p className="text-xs text-slate-200 leading-relaxed">
+                            {lang === 'ar'
+                              ? 'المحادثات السابقة تظهر بالاسم على الجانب. أو ابدأ محادثة جديدة مع شخص آخر.'
+                              : 'Saved chats appear by name on the side — or start a new one.'}
+                          </p>
+                        </div>
                         <button
                           onClick={() => setShowNewChatModal(true)}
-                          className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-slate-800 text-xs font-semibold transition-colors"
+                          className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-semibold shadow-md flex items-center gap-1.5"
                         >
+                          <Plus className="w-4 h-4" />
                           {t('startChat')}
                         </button>
                       </div>
@@ -2225,7 +2483,7 @@ export default function Home() {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-sm font-display font-bold text-slate-800">{t('usersDirectory')}</h3>
+                        <h3 className="text-sm font-display font-bold text-slate-100">{t('usersDirectory')}</h3>
                         <p className="text-xs text-slate-400">{t('usersSubtitle')}</p>
                       </div>
 
@@ -2239,8 +2497,8 @@ export default function Home() {
                     </div>
 
                     <div className="glow-card rounded-2xl overflow-x-auto">
-                      <table className="w-full text-start text-xs text-slate-600 min-w-[650px]">
-                        <thead className="bg-slate-50 border-b border-sky-100 text-slate-400 uppercase text-[10px]">
+                      <table className="w-full text-start text-xs text-slate-300 min-w-[650px]">
+                        <thead className="bg-slate-800/55 border-b border-slate-600/50 text-slate-400 uppercase text-[10px]">
                           <tr>
                             <th className="p-3 text-start">{t('userColName')}</th>
                             <th className="p-3 text-start">{t('userColJobTitle')}</th>
@@ -2250,23 +2508,23 @@ export default function Home() {
                             <th className="p-3 text-end">{t('userColActions')}</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-sky-100">
+                        <tbody className="divide-y divide-slate-700/60">
                           {userList.map((u) => (
-                            <tr key={u.id} className="hover:bg-white/80 transition-colors">
-                              <td className="p-3 font-semibold text-slate-800">
+                            <tr key={u.id} className="hover:bg-slate-800/75 transition-colors">
+                              <td className="p-3 font-semibold text-slate-100">
                                 {u.firstName} {u.lastName}
                               </td>
-                              <td className="p-3 text-sky-600 font-medium">
+                              <td className="p-3 text-cyan-400 font-medium">
                                 {u.jobTitle || '—'}
                               </td>
                               <td className="p-3 text-slate-400 font-mono text-[11px]">{u.email}</td>
                               <td className="p-3">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700/45 text-cyan-300">
                                   {u.roles?.join(', ') || 'Engineer'}
                                 </span>
                               </td>
                               <td className="p-3">
-                                <span className={`text-[10px] px-2 py-0.5 rounded ${u.isActive ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
+                                <span className={`text-[10px] px-2 py-0.5 rounded ${u.isActive ? 'text-emerald-400 bg-emerald-500/15' : 'text-rose-400 bg-rose-500/15'}`}>
                                   {u.isActive ? t('statusActive') : t('statusDisabled')}
                                 </span>
                               </td>
@@ -2279,7 +2537,7 @@ export default function Home() {
                                       alert(lang === 'ar' ? 'تم إعادة تعيين كلمة المرور بنجاح.' : 'Password successfully reset.');
                                     }
                                   }}
-                                  className="text-[11px] text-amber-600 hover:underline"
+                                  className="text-[11px] text-amber-400 hover:underline"
                                 >
                                   {t('actionResetPass')}
                                 </button>
@@ -2291,7 +2549,7 @@ export default function Home() {
                                       setUserList(updated);
                                     }
                                   }}
-                                  className="text-[11px] text-rose-600 hover:underline"
+                                  className="text-[11px] text-rose-400 hover:underline"
                                 >
                                   {t('actionDeactivate')}
                                 </button>
@@ -2312,7 +2570,7 @@ export default function Home() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-bold text-slate-800">{t('auditTitle')}</h3>
+                      <h3 className="text-sm font-bold text-slate-100">{t('auditTitle')}</h3>
                       <p className="text-xs text-slate-400">{t('auditSubtitle')}</p>
                     </div>
 
@@ -2324,13 +2582,13 @@ export default function Home() {
                         dashboardService.getAuditLogs(1, 20, e.target.value).then((res) => setAuditLogs(res.items));
                       }}
                       placeholder={t('auditSearchPlaceholder')}
-                      className="px-3 py-1.5 bg-white border border-sky-100 rounded-xl text-xs text-slate-800"
+                      className="px-3 py-1.5 bg-slate-800/70 border border-slate-600/50 rounded-xl text-xs text-slate-100"
                     />
                   </div>
 
                   <div className="glow-card rounded-2xl overflow-hidden">
-                    <table className="w-full text-left text-xs text-slate-600">
-                      <thead className="bg-slate-50 border-b border-sky-100 text-slate-400 uppercase text-[10px]">
+                    <table className="w-full text-left text-xs text-slate-300">
+                      <thead className="bg-slate-800/55 border-b border-slate-600/50 text-slate-400 uppercase text-[10px]">
                         <tr>
                           <th className="p-3">{t('auditColTime')}</th>
                           <th className="p-3">{t('auditColAction')}</th>
@@ -2339,12 +2597,12 @@ export default function Home() {
                           <th className="p-3">{t('auditColIp')}</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-sky-100">
+                      <tbody className="divide-y divide-slate-700/60">
                         {auditLogs.map((log) => (
-                          <tr key={log.id} className="hover:bg-white/80">
+                          <tr key={log.id} className="hover:bg-slate-800/75">
                             <td className="p-3 text-[11px] text-slate-400">{new Date(log.createdAt).toLocaleString()}</td>
-                            <td className="p-3 font-semibold text-slate-800">{log.action}</td>
-                            <td className="p-3 text-slate-600">
+                            <td className="p-3 font-semibold text-slate-100">{log.action}</td>
+                            <td className="p-3 text-slate-300">
                               {log.entityType} ({log.entityId?.substring(0, 8)}...)
                             </td>
                             <td className="p-3 text-slate-400">{log.userEmail || 'System'}</td>
@@ -2363,39 +2621,39 @@ export default function Home() {
               {activeTab === 'settings' && (
                 <div className="max-w-2xl mx-auto space-y-4">
                   <div>
-                    <h3 className="text-sm font-bold text-slate-800">{t('settingsTitle')}</h3>
+                    <h3 className="text-sm font-bold text-slate-100">{t('settingsTitle')}</h3>
                     <p className="text-xs text-slate-400">{t('settingsSubtitle')}</p>
                   </div>
 
                   {safeConfig && (
                     <div className="glow-card p-6 rounded-2xl space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-600/50">
                         <span className="text-xs text-slate-400">{t('appNameField')}</span>
-                        <span className="text-xs font-semibold text-slate-800">{safeConfig.appName}</span>
+                        <span className="text-xs font-semibold text-slate-100">{safeConfig.appName}</span>
                       </div>
-                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-600/50">
                         <span className="text-xs text-slate-400">{t('environmentField')}</span>
-                        <span className="text-xs font-semibold text-emerald-600">{safeConfig.environment}</span>
+                        <span className="text-xs font-semibold text-emerald-400">{safeConfig.environment}</span>
                       </div>
-                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-600/50">
                         <span className="text-xs text-slate-400">{t('signalRPathField')}</span>
-                        <span className="text-xs font-mono text-mti-600">{safeConfig.signalR?.hubPath}</span>
+                        <span className="text-xs font-mono text-cyan-300">{safeConfig.signalR?.hubPath}</span>
                       </div>
-                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-600/50">
                         <span className="text-xs text-slate-400">{t('signalREnabledField')}</span>
-                        <span className="text-xs font-semibold text-emerald-600">
+                        <span className="text-xs font-semibold text-emerald-400">
                           {safeConfig.signalR?.enabled ? 'True' : 'False'}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                      <div className="flex items-center justify-between pb-3 border-b border-slate-600/50">
                         <span className="text-xs text-slate-400">{t('signalRUrlField')}</span>
-                        <span className="text-xs font-mono text-emerald-600">
+                        <span className="text-xs font-mono text-emerald-400">
                           {safeConfig.signalR?.hubUrl || 'https://mtiapi.runasp.net/hubs/project'}
                         </span>
                       </div>
-                      <div className="p-3 rounded-xl bg-white border border-sky-100 text-[11px] text-slate-400 space-y-1">
-                        <div className="font-semibold text-slate-800 flex items-center gap-1.5">
-                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                      <div className="p-3 rounded-xl bg-slate-800/70 border border-slate-600/50 text-[11px] text-slate-400 space-y-1">
+                        <div className="font-semibold text-slate-100 flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
                           {t('securityHardened')}
                         </div>
                         <p>
@@ -2414,8 +2672,8 @@ export default function Home() {
                 <div className="max-w-3xl mx-auto space-y-4 animate-fade-up">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-display font-bold text-slate-800 flex items-center gap-2">
-                        <Bell className="w-4 h-4 text-mti-600" />
+                      <h3 className="text-sm font-display font-bold text-slate-100 flex items-center gap-2">
+                        <Bell className="w-4 h-4 text-cyan-300" />
                         Real-Time Notifications
                       </h3>
                       <p className="text-xs text-slate-400">
@@ -2429,17 +2687,17 @@ export default function Home() {
                           await notificationService.markAllAsRead();
                           setNotificationsList((prev) => prev.map((n) => ({ ...n, isRead: true })));
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-white/[0.08] border border-sky-100 text-xs text-slate-700 transition-colors"
+                        className="px-3 py-1.5 rounded-xl bg-slate-800/45 hover:bg-slate-700/45 border border-slate-600/50 text-xs text-slate-200 transition-colors"
                       >
                         Mark All as Read
                       </button>
                     )}
                   </div>
 
-                  <div className="glass-panel rounded-2xl border border-sky-100 overflow-hidden divide-y divide-sky-100">
+                  <div className="glass-panel rounded-2xl border border-slate-600/50 overflow-hidden divide-y divide-slate-700/60">
                     {notificationsList.length === 0 ? (
                       <div className="p-12 text-center text-xs text-slate-500">
-                        <Bell className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+                        <Bell className="w-8 h-8 text-slate-300 mx-auto mb-2 opacity-50" />
                         No notifications yet. New live events from SignalR will appear here instantly.
                       </div>
                     ) : (
@@ -2455,14 +2713,14 @@ export default function Home() {
                             }
                           }}
                           className={`p-4 transition-colors flex items-start gap-3.5 cursor-pointer ${
-                            notif.isRead ? 'bg-transparent hover:bg-white/30' : 'bg-mti-500/[0.05] hover:bg-mti-500/[0.08]'
+                            notif.isRead ? 'bg-transparent hover:bg-slate-700/35' : 'bg-cyan-500/10 hover:bg-cyan-500/15'
                           }`}
                         >
                           <div
                             className={`p-2 rounded-xl border flex-shrink-0 ${
                               notif.isRead
-                                ? 'bg-slate-100 border-sky-200 text-slate-400'
-                                : 'bg-mti-100 border-mti-200 text-mti-600 shadow-md shadow-mti-500/10'
+                                ? 'bg-slate-700/45 border-slate-500/40 text-slate-400'
+                                : 'bg-mti-100 border-cyan-400/25 text-cyan-300 shadow-md shadow-mti-500/10'
                             }`}
                           >
                             <Radio className="w-4 h-4" />
@@ -2470,7 +2728,7 @@ export default function Home() {
 
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center justify-between gap-2">
-                              <h4 className={`text-xs font-semibold ${notif.isRead ? 'text-slate-600' : 'text-slate-800'}`}>
+                              <h4 className={`text-xs font-semibold ${notif.isRead ? 'text-slate-300' : 'text-slate-100'}`}>
                                 {notif.title}
                               </h4>
                               <span className="text-[10px] text-slate-500 flex-shrink-0">
@@ -2481,11 +2739,11 @@ export default function Home() {
                               {notif.body}
                             </p>
                             <div className="mt-2 flex items-center gap-2">
-                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-100/80 text-slate-400 border border-sky-200 uppercase tracking-wider font-semibold">
+                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-700/45/80 text-slate-400 border border-slate-500/40 uppercase tracking-wider font-semibold">
                                 {notif.type}
                               </span>
                               {!notif.isRead && (
-                                <span className="text-[9px] text-emerald-600 font-medium flex items-center gap-1">
+                                <span className="text-[9px] text-emerald-400 font-medium flex items-center gap-1">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                                   New
                                 </span>
@@ -2507,21 +2765,21 @@ export default function Home() {
       {drawerData && (
         <div className="fixed inset-0 z-50 overflow-hidden">
           <div className="absolute inset-0 bg-slate-900/25 backdrop-blur-sm" onClick={() => setDrawerData(null)} />
-          <div className="fixed inset-y-0 right-0 max-w-md w-full bg-sky-50 border-l border-sky-100 p-6 flex flex-col shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-sky-100 pb-3">
+          <div className="fixed inset-y-0 right-0 max-w-md w-full bg-slate-800/45 border-l border-slate-600/50 p-6 flex flex-col shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-600/50 pb-3">
               <div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600">
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700/45 text-cyan-300">
                   {drawerData.type}
                 </span>
-                <h3 className="font-bold text-slate-800 text-base mt-1">{drawerData.title}</h3>
+                <h3 className="font-bold text-slate-100 text-base mt-1">{drawerData.title}</h3>
               </div>
-              <button onClick={() => setDrawerData(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-800">
+              <button onClick={() => setDrawerData(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-3 text-xs text-slate-600">
-              <pre className="p-3 rounded-xl bg-white border border-sky-100 font-mono text-[11px] text-emerald-600 overflow-x-auto">
+            <div className="flex-1 overflow-y-auto space-y-3 text-xs text-slate-300">
+              <pre className="p-3 rounded-xl bg-slate-800/70 border border-slate-600/50 font-mono text-[11px] text-emerald-400 overflow-x-auto">
                 {JSON.stringify(drawerData.details, null, 2)}
               </pre>
             </div>
@@ -2531,20 +2789,20 @@ export default function Home() {
 
       {/* 4. CONFIRMATION DIALOG (Prompt 20) */}
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel max-w-sm w-full p-6 rounded-2xl border border-sky-100 shadow-xl space-y-4">
-            <h3 className="text-base font-bold text-slate-800">{confirmDialog.title}</h3>
-            <p className="text-xs text-slate-600">{confirmDialog.message}</p>
+        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-sm w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl space-y-4">
+            <h3 className="text-base font-bold text-slate-100">{confirmDialog.title}</h3>
+            <p className="text-xs text-slate-300">{confirmDialog.message}</p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
-                className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 text-xs font-medium"
+                className="px-4 py-2 rounded-xl bg-slate-800/70 hover:bg-slate-700/45 text-slate-300 text-xs font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDialog.onConfirm}
-                className={`px-4 py-2 rounded-xl text-slate-800 text-xs font-semibold ${
+                className={`px-4 py-2 rounded-xl text-slate-100 text-xs font-semibold ${
                   confirmDialog.confirmColor || 'bg-mti-600 hover:bg-mti-500'
                 }`}
               >
@@ -2557,9 +2815,9 @@ export default function Home() {
 
       {/* 5. NEW PROJECT MODAL */}
       {showNewProjectModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-sky-100 shadow-xl">
-            <h3 className="text-base font-bold text-slate-800 mb-4">{t('createProject')}</h3>
+        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl">
+            <h3 className="text-base font-bold text-slate-100 mb-4">{t('createProject')}</h3>
             <form onSubmit={handleCreateProject} className="space-y-4">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">{t('projectCode')}</label>
@@ -2569,7 +2827,7 @@ export default function Home() {
                   onChange={(e) => setNewCode(e.target.value)}
                   placeholder="PRJ-2026-ALEX"
                   required
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 />
               </div>
 
@@ -2581,7 +2839,7 @@ export default function Home() {
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Alexandria Port Hub"
                   required
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 />
               </div>
 
@@ -2592,7 +2850,7 @@ export default function Home() {
                   value={newClient}
                   onChange={(e) => setNewClient(e.target.value)}
                   placeholder="Port Authority"
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 />
               </div>
 
@@ -2602,7 +2860,7 @@ export default function Home() {
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
                   rows={2}
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 />
               </div>
 
@@ -2610,7 +2868,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowNewProjectModal(false)}
-                  className="px-4 py-2 rounded-xl bg-white text-slate-600 text-xs"
+                  className="px-4 py-2 rounded-xl bg-slate-800/70 text-slate-300 text-xs"
                 >
                   {t('cancel')}
                 </button>
@@ -2628,9 +2886,9 @@ export default function Home() {
 
       {/* 6. NEW TASK MODAL */}
       {showNewTaskModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-sky-100 shadow-xl">
-            <h3 className="text-base font-bold text-slate-800 mb-4">{t('createTask')}</h3>
+        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl">
+            <h3 className="text-base font-bold text-slate-100 mb-4">{t('createTask')}</h3>
             <form onSubmit={handleCreateTask} className="space-y-4">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">{t('taskTitle')}</label>
@@ -2640,7 +2898,7 @@ export default function Home() {
                   onChange={(e) => setNewTaskTitle(e.target.value)}
                   placeholder="Excavate foundation row B"
                   required
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 />
               </div>
 
@@ -2649,7 +2907,7 @@ export default function Home() {
                 <select
                   value={newTaskPriority}
                   onChange={(e) => setNewTaskPriority(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 >
                   <option value="Low">{t('priorityLow')}</option>
                   <option value="Medium">{t('priorityMedium')}</option>
@@ -2662,7 +2920,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowNewTaskModal(false)}
-                  className="px-4 py-2 rounded-xl bg-white text-slate-600 text-xs"
+                  className="px-4 py-2 rounded-xl bg-slate-800/70 text-slate-300 text-xs"
                 >
                   Cancel
                 </button>
@@ -2680,14 +2938,14 @@ export default function Home() {
 
       {/* 7. NEW USER MODAL */}
       {showNewUserModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-sky-100 shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-slate-800">{t('createCorporateUser')}</h3>
+              <h3 className="text-base font-bold text-slate-100">{t('createCorporateUser')}</h3>
               <button
                 type="button"
                 onClick={() => setShowNewUserModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-800 transition-colors"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2702,7 +2960,7 @@ export default function Home() {
                     value={newFirstName}
                     onChange={(e) => setNewFirstName(e.target.value)}
                     required
-                    className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                    className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                   />
                 </div>
                 <div>
@@ -2712,7 +2970,7 @@ export default function Home() {
                     value={newLastName}
                     onChange={(e) => setNewLastName(e.target.value)}
                     required
-                    className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                    className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                   />
                 </div>
               </div>
@@ -2724,7 +2982,7 @@ export default function Home() {
                   value={newUserJobTitle}
                   onChange={(e) => setNewUserJobTitle(e.target.value)}
                   placeholder={t('jobTitlePlaceholder')}
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 />
               </div>
 
@@ -2736,7 +2994,7 @@ export default function Home() {
                   onChange={(e) => setNewUserEmail(e.target.value)}
                   placeholder="field.engineer@mti.com"
                   required
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 />
               </div>
 
@@ -2747,7 +3005,7 @@ export default function Home() {
                   value={newUserPassword}
                   onChange={(e) => setNewUserPassword(e.target.value)}
                   required
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 />
               </div>
 
@@ -2756,7 +3014,7 @@ export default function Home() {
                 <select
                   value={newUserRole}
                   onChange={(e) => setNewUserRole(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                 >
                   <option value="Engineer">{t('userRoleEngineer')}</option>
                   <option value="ProjectManager">{t('userRolePM')}</option>
@@ -2768,7 +3026,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowNewUserModal(false)}
-                  className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 text-xs transition-colors"
+                  className="px-4 py-2 rounded-xl bg-slate-800/70 hover:bg-slate-700/45 text-slate-300 text-xs transition-colors"
                 >
                   {t('cancel')}
                 </button>
@@ -2786,43 +3044,48 @@ export default function Home() {
 
       {/* Start Direct Chat Modal / User Search */}
       {showNewChatModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-sky-50 border border-sky-100 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-xl animate-fade-up">
-            <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#1a2f4a] border-2 border-cyan-400/25 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl animate-fade-up">
+            <div className="flex items-center justify-between pb-3 border-b-2 border-cyan-400/20">
               <div className="flex items-center gap-2">
-                <MessageSquare className="w-5 h-5 text-sky-600" />
-                <h3 className="font-bold text-slate-800 text-sm">{t('startChat')}</h3>
+                <MessageSquare className="w-5 h-5 text-cyan-300" />
+                <div>
+                  <h3 className="font-bold text-slate-100 text-sm">{t('startChat')}</h3>
+                  <p className="text-[11px] text-slate-300">
+                    {lang === 'ar'
+                      ? 'ابحث عن شخص وابدأ محادثة — هتتحفظ باسمه في القائمة'
+                      : 'Find someone to chat — saved by name in the list'}
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setShowNewChatModal(false)}
-                className="p-1 rounded-lg hover:bg-sky-50 text-slate-400 hover:text-slate-800 transition-colors"
+                className="p-1 rounded-lg hover:bg-slate-700/50 text-slate-300 hover:text-slate-100 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Search Input */}
             <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute start-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-slate-300 absolute start-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={chatSearchUser}
                 onChange={(e) => setChatSearchUser(e.target.value)}
                 placeholder={t('searchUsersChat')}
                 autoFocus
-                className="w-full ps-9 pe-4 py-2.5 bg-white/90 border border-sky-100 rounded-xl text-slate-800 text-xs placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors"
+                className="w-full ps-9 pe-4 py-3 bg-[#1a2d45] border-2 border-cyan-400/30 rounded-xl text-slate-100 text-sm placeholder:text-slate-400 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
               />
             </div>
 
-            {/* Contacts list */}
             <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
               {loadingContacts ? (
-                <div className="py-8 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
-                  <RefreshCw className="w-4 h-4 animate-spin text-sky-600" />
+                <div className="py-8 text-center text-xs text-slate-300 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
                   <span>{t('loading')}</span>
                 </div>
               ) : chatContacts.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-500">
+                <div className="py-8 text-center text-xs text-slate-300">
                   {lang === 'ar' ? 'لم يتم العثور على مستخدمين بهذا الاسم' : 'No users found'}
                 </div>
               ) : (
@@ -2830,29 +3093,27 @@ export default function Home() {
                   <div
                     key={contact.id}
                     onClick={() => handleStartDirectChat(contact)}
-                    className="p-3 rounded-xl bg-sky-50/80 hover:bg-sky-500/10 border border-white/5 hover:border-sky-500/30 transition-all cursor-pointer flex items-center justify-between group"
+                    className="p-3 rounded-xl bg-[#1e334f] hover:bg-cyan-500/15 border-2 border-cyan-400/18 hover:border-cyan-400/40 transition-all cursor-pointer flex items-center justify-between group"
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-full bg-sky-500/20 border border-sky-400/30 flex items-center justify-center font-bold text-xs text-sky-600 flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-cyan-500 text-white flex items-center justify-center font-bold text-sm flex-shrink-0 shadow-sm">
                         {(contact.fullName || 'U')[0]}
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-xs text-slate-800 group-hover:text-sky-600 transition-colors truncate">
+                          <span className="font-bold text-xs text-slate-100 group-hover:text-cyan-300 transition-colors truncate">
                             {contact.fullName}
                           </span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 border border-sky-200 text-slate-600 font-mono flex-shrink-0">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 border border-slate-400 text-slate-200 font-mono flex-shrink-0">
                             {contact.role}
                           </span>
                         </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                        <div className="flex items-center gap-2 text-[11px] text-slate-300 mt-0.5">
                           {contact.jobTitle && (
-                            <span className="text-sky-600/90 font-medium truncate">
-                              {contact.jobTitle}
-                            </span>
+                            <span className="text-cyan-300 font-medium truncate">{contact.jobTitle}</span>
                           )}
-                          {contact.jobTitle && <span className="text-slate-600">&bull;</span>}
-                          <span className="text-slate-500 truncate">{contact.email}</span>
+                          {contact.jobTitle && <span className="text-slate-400">•</span>}
+                          <span className="truncate">{contact.email}</span>
                         </div>
                       </div>
                     </div>
@@ -2861,19 +3122,19 @@ export default function Home() {
                         e.stopPropagation();
                         handleStartDirectChat(contact);
                       }}
-                      className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-slate-800 text-xs font-semibold flex items-center gap-1 transition-colors flex-shrink-0 shadow-sm"
+                      className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-semibold flex items-center gap-1 transition-colors flex-shrink-0 shadow-sm"
                     >
-                      <span>{t('startChat')}</span>
+                      <span>{lang === 'ar' ? 'محادثة' : 'Chat'}</span>
                     </button>
                   </div>
                 ))
               )}
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-sky-100">
+            <div className="flex justify-end pt-2 border-t-2 border-cyan-400/20">
               <button
                 onClick={() => setShowNewChatModal(false)}
-                className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 text-xs transition-colors"
+                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-medium transition-colors"
               >
                 {t('close')}
               </button>
@@ -2897,19 +3158,19 @@ export default function Home() {
               }}
               className={`p-3.5 rounded-2xl border shadow-xl backdrop-blur-xl pointer-events-auto cursor-pointer transition-all hover:scale-[1.02] flex items-start gap-3 animate-fade-up ${
                 toast.type === 'chat'
-                  ? 'bg-sky-950/90 border-sky-500/40 text-sky-100'
+                  ? 'bg-slate-950/90 border-cyan-400/35 text-cyan-50'
                   : toast.type === 'task'
                   ? 'bg-amber-950/90 border-amber-500/40 text-amber-100'
-                  : 'bg-sky-50/90 border-sky-100 text-slate-800'
+                  : 'bg-slate-800/90 border-slate-600/50 text-slate-100'
               }`}
             >
               <div
                 className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
                   toast.type === 'chat'
-                    ? 'bg-sky-500/20 text-sky-600'
+                    ? 'bg-cyan-500/20 text-cyan-400'
                     : toast.type === 'task'
-                    ? 'bg-amber-50 text-amber-600'
-                    : 'bg-mti-100 text-mti-600'
+                    ? 'bg-amber-500/15 text-amber-400'
+                    : 'bg-mti-100 text-cyan-300'
                 }`}
               >
                 {toast.type === 'chat' ? (
@@ -2925,7 +3186,7 @@ export default function Home() {
                   <span className="truncate">{toast.title}</span>
                   <span className="text-[10px] text-slate-400 ms-2 font-mono">Real-time</span>
                 </div>
-                <p className="text-[11px] text-slate-600 line-clamp-2 mt-0.5 leading-relaxed">
+                <p className="text-[11px] text-slate-300 line-clamp-2 mt-0.5 leading-relaxed">
                   {toast.message}
                 </p>
               </div>
@@ -2934,7 +3195,7 @@ export default function Home() {
                   e.stopPropagation();
                   setToasts((prev) => prev.filter((t) => t.id !== toast.id));
                 }}
-                className="text-slate-400 hover:text-slate-800 p-1 rounded-lg transition-colors flex-shrink-0"
+                className="text-slate-400 hover:text-slate-100 p-1 rounded-lg transition-colors flex-shrink-0"
               >
                 <X className="w-3.5 h-3.5" />
               </button>

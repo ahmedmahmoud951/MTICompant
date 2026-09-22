@@ -1,7 +1,7 @@
 import { ApiResponse } from '@/types';
 import { logger } from './logger';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5241';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://mtiapi.runasp.net';
 
 class ApiClient {
   private getAccessToken(): string | null {
