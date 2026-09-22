@@ -5,6 +5,7 @@ export const dataRecordService = {
   async getRecords(status?: string): Promise<ProjectDataRecord[]> {
     const query = status ? `?status=${status}` : '';
     const res = await apiClient.get<any>(`/api/project-data${query}`);
+    if (!res.success) return [];
     if (Array.isArray(res.data)) return res.data;
     if (res.data && Array.isArray(res.data.items)) return res.data.items;
     return [];
@@ -22,10 +23,21 @@ export const dataRecordService = {
     projectId: string;
     siteId: string;
     title: string;
-    category: string;
-    dataPayloadJson: string;
+    description: string;
+    submitDirectly?: boolean;
+    attachmentMediaIds?: string[];
   }): Promise<ProjectDataRecord> {
-    const res = await apiClient.post<ProjectDataRecord>('/api/project-data', payload);
+    const res = await apiClient.post<ProjectDataRecord>('/api/project-data', {
+      projectId: payload.projectId,
+      siteId: payload.siteId,
+      title: payload.title,
+      description: payload.description,
+      submitDirectly: payload.submitDirectly ?? true,
+      attachmentMediaIds: payload.attachmentMediaIds || []
+    });
+    if (!res.success || !res.data) {
+      throw new Error(res.message || 'Failed to create report');
+    }
     return res.data;
   },
 
@@ -35,17 +47,19 @@ export const dataRecordService = {
   },
 
   async approve(id: string, comments?: string): Promise<boolean> {
-    const res = await apiClient.post(`/api/project-data/${id}/approve`, { comments: comments || 'Approved by administrator' });
+    const res = await apiClient.post(`/api/project-data/${id}/approve`, {
+      comment: comments || 'Approved by administrator'
+    });
     return res.success;
   },
 
   async reject(id: string, comments: string): Promise<boolean> {
-    const res = await apiClient.post(`/api/project-data/${id}/reject`, { comments });
+    const res = await apiClient.post(`/api/project-data/${id}/reject`, { comment: comments });
     return res.success;
   },
 
   async requestChanges(id: string, comments: string): Promise<boolean> {
-    const res = await apiClient.post(`/api/project-data/${id}/request-changes`, { comments });
+    const res = await apiClient.post(`/api/project-data/${id}/request-changes`, { comment: comments });
     return res.success;
   },
 

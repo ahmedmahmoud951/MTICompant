@@ -9,6 +9,7 @@ import { dashboardService } from '@/services/dashboard.service';
 import { dataRecordService } from '@/services/data-records.service';
 import { taskService } from '@/services/task.service';
 import { notificationService } from '@/services/notification.service';
+import { mediaService } from '@/services/media.service';
 import {
   Project,
   Site,
@@ -112,9 +113,15 @@ export default function Home() {
   // Engineer Data Submission Form
   const [submitCategory, setSubmitCategory] = useState('DailyReport');
   const [submitTitle, setSubmitTitle] = useState('');
-  const [submitPayload, setSubmitPayload] = useState('{\n  "weather": "Clear",\n  "crewCount": 14,\n  "workDone": "Reinforced concrete casting - Pier 4"\n}');
+  const [submitWeather, setSubmitWeather] = useState('');
+  const [submitCrewCount, setSubmitCrewCount] = useState('');
+  const [submitWorkDone, setSubmitWorkDone] = useState('');
+  const [submitNotes, setSubmitNotes] = useState('');
+  const [submitSiteId, setSubmitSiteId] = useState('');
   const [submitSuccess, setSubmitSuccess] = useState('');
-  const [uploadedFiles, setUploadedFiles] = useState<{ name: string; size: string }[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<{ id?: string; name: string; size: string; file?: File }[]>([]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Real-Time Chat & WhatsApp Message Statuses
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -446,10 +453,20 @@ export default function Home() {
           loadProjects().catch(() => {});
           notificationService.getNotifications().then((res) => setNotificationsList(res.items)).catch(() => {});
         });
-        conn.on('TaskStatusChanged', () => {
+        conn.on('TaskStatusChanged', (payload?: { title?: string; status?: string; oldStatus?: string }) => {
           taskService.getTasks().then(setTasks).catch(() => {});
+          notificationService.getNotifications().then((res) => setNotificationsList(res.items)).catch(() => {});
           const u = authService.getCurrentUser();
-          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+          const isAdminUser = u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin') || u?.roles.includes('ProjectManager');
+          if (isAdminUser) {
+            addToast(
+              lang === 'ar' ? 'تحديث حالة مهمة' : 'Task status updated',
+              payload?.title
+                ? `${payload.title}: ${payload.oldStatus || ''} → ${payload.status || ''}`
+                : (lang === 'ar' ? 'تم تحديث مهمة' : 'A task was updated'),
+              'task',
+              'tasks'
+            );
             dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
           } else {
             dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
@@ -592,12 +609,17 @@ export default function Home() {
     e.preventDefault();
     try {
       const payload = {
-        code: newCode,
-        name: newName,
-        description: newDesc,
-        clientName: newClient,
-        memberUserIds: newProjectMemberIds
+        code: newCode.trim(),
+        name: newName.trim(),
+        description: newDesc.trim(),
+        clientName: newClient.trim(),
+        memberUserIds: newProjectMemberIds,
+        status: 'Planning'
       };
+      if (!payload.code || !payload.name) {
+        alert(lang === 'ar' ? 'اكتب كود واسم المشروع (أرقام أو حروف).' : 'Enter project code and name.');
+        return;
+      }
       if (editingProjectId) {
         const res = await projectService.updateProject(editingProjectId, payload);
         if (!res.success) throw new Error(res.message || 'Failed to update project');
@@ -613,8 +635,14 @@ export default function Home() {
       setNewClient('');
       setNewProjectMemberIds([]);
       await loadProjects();
+      dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
     } catch (err: any) {
-      alert(err?.message || 'Failed to save project');
+      alert(
+        err?.message
+          || (lang === 'ar'
+            ? 'فشل حفظ المشروع. لو ظهر 403: سجّل خروج ثم دخول بحساب Admin وانشر الـ API المحدّث.'
+            : 'Failed to save project')
+      );
     }
   };
 
@@ -770,6 +798,181 @@ export default function Home() {
     if (hours < 24) return t('lastSeenHours').replace('{n}', String(hours));
     const days = Math.floor(hours / 24);
     return t('lastSeenDays').replace('{n}', String(days));
+  };
+
+  const formatDrawerDate = (iso?: string | null) => {
+    if (!iso) return lang === 'ar' ? 'غير محدد' : 'Not set';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return lang === 'ar' ? 'غير محدد' : 'Not set';
+    return d.toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-GB', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const translateStatusLabel = (status?: string | number | null) => {
+    const s = String(status ?? '').trim();
+    if (!s) return lang === 'ar' ? 'غير محدد' : 'Not set';
+    const map: Record<string, { ar: string; en: string }> = {
+      Planning: { ar: 'تخطيط', en: 'Planning' },
+      Active: { ar: 'نشط', en: 'Active' },
+      OnHold: { ar: 'موقوف مؤقتاً', en: 'On Hold' },
+      Completed: { ar: 'مكتمل', en: 'Completed' },
+      Cancelled: { ar: 'ملغي', en: 'Cancelled' },
+      Pending: { ar: 'قيد الانتظار', en: 'Pending' },
+      ToDo: { ar: 'للتنفيذ', en: 'To Do' },
+      InProgress: { ar: 'قيد التنفيذ', en: 'In Progress' },
+      UnderReview: { ar: 'قيد المراجعة', en: 'Under Review' },
+      Submitted: { ar: 'مُرسل', en: 'Submitted' },
+      Approved: { ar: 'معتمد', en: 'Approved' },
+      Rejected: { ar: 'مرفوض', en: 'Rejected' },
+      Draft: { ar: 'مسودة', en: 'Draft' },
+      ChangesRequested: { ar: 'مطلوب تعديلات', en: 'Changes Requested' },
+      Low: { ar: 'منخفضة', en: 'Low' },
+      Medium: { ar: 'متوسطة', en: 'Medium' },
+      High: { ar: 'عالية', en: 'High' },
+      Urgent: { ar: 'عاجلة', en: 'Urgent' },
+      '0': { ar: 'تخطيط', en: 'Planning' },
+      '1': { ar: 'نشط', en: 'Active' }
+    };
+    const hit = map[s];
+    if (hit) return lang === 'ar' ? hit.ar : hit.en;
+    return s;
+  };
+
+  const getDrawerTypeLabel = (type: string) => {
+    const map: Record<string, { ar: string; en: string }> = {
+      Project: { ar: 'مشروع', en: 'Project' },
+      Site: { ar: 'موقع', en: 'Site' },
+      Task: { ar: 'مهمة', en: 'Task' },
+      'Approved Data': { ar: 'بيانات معتمدة', en: 'Approved Data' },
+      Data: { ar: 'بيانات', en: 'Data' },
+      User: { ar: 'مستخدم', en: 'User' }
+    };
+    const hit = map[type];
+    if (hit) return lang === 'ar' ? hit.ar : hit.en;
+    return type;
+  };
+
+  const getDrawerFields = (type: string, details: any): { label: string; value: string }[] => {
+    if (!details || typeof details !== 'object') {
+      return [{ label: lang === 'ar' ? 'التفاصيل' : 'Details', value: String(details ?? '—') }];
+    }
+
+    const empty = lang === 'ar' ? '—' : '—';
+    const text = (v: any) => {
+      if (v === null || v === undefined || v === '') return empty;
+      return String(v);
+    };
+
+    const lowerType = type.toLowerCase();
+
+    if (lowerType.includes('project') && details.code !== undefined) {
+      return [
+        { label: lang === 'ar' ? 'اسم المشروع' : 'Project name', value: text(details.name) },
+        { label: t('projectCode'), value: text(details.code) },
+        { label: t('clientName'), value: text(details.clientName) },
+        { label: lang === 'ar' ? 'الحالة' : 'Status', value: translateStatusLabel(details.status) },
+        { label: t('description'), value: text(details.description) || empty },
+        {
+          label: lang === 'ar' ? 'عدد المواقع' : 'Sites count',
+          value: text(details.totalSitesCount ?? details.sitesCount ?? 0)
+        },
+        {
+          label: lang === 'ar' ? 'تاريخ البداية' : 'Start date',
+          value: formatDrawerDate(details.startDate)
+        },
+        {
+          label: lang === 'ar' ? 'تاريخ النهاية' : 'End date',
+          value: formatDrawerDate(details.endDate)
+        },
+        {
+          label: lang === 'ar' ? 'تاريخ الإنشاء' : 'Created at',
+          value: formatDrawerDate(details.createdAt)
+        }
+      ];
+    }
+
+    if (lowerType.includes('site') && (details.address !== undefined || details.projectName !== undefined)) {
+      return [
+        { label: lang === 'ar' ? 'اسم الموقع' : 'Site name', value: text(details.name) },
+        { label: lang === 'ar' ? 'كود الموقع' : 'Site code', value: text(details.code) },
+        { label: lang === 'ar' ? 'المشروع' : 'Project', value: text(details.projectName) },
+        { label: lang === 'ar' ? 'العنوان' : 'Address', value: text(details.address) },
+        { label: lang === 'ar' ? 'الحالة' : 'Status', value: translateStatusLabel(details.status) },
+        { label: t('description'), value: text(details.description) || empty },
+        {
+          label: lang === 'ar' ? 'تاريخ الإنشاء' : 'Created at',
+          value: formatDrawerDate(details.createdAt)
+        }
+      ];
+    }
+
+    if (lowerType.includes('task') || details.priority !== undefined) {
+      return [
+        { label: lang === 'ar' ? 'عنوان المهمة' : 'Task title', value: text(details.title || details.name) },
+        { label: lang === 'ar' ? 'المشروع' : 'Project', value: text(details.projectName) },
+        { label: lang === 'ar' ? 'الموقع' : 'Site', value: text(details.siteName) },
+        { label: lang === 'ar' ? 'الحالة' : 'Status', value: translateStatusLabel(details.status) },
+        { label: t('priority'), value: translateStatusLabel(details.priority) },
+        {
+          label: lang === 'ar' ? 'المُسند إليه' : 'Assigned to',
+          value: text(details.assignedToName) || (lang === 'ar' ? 'غير مسند' : 'Unassigned')
+        },
+        { label: lang === 'ar' ? 'موعد التسليم' : 'Due date', value: formatDrawerDate(details.dueAt) },
+        { label: t('description'), value: text(details.description) || empty },
+        {
+          label: lang === 'ar' ? 'تاريخ الإنشاء' : 'Created at',
+          value: formatDrawerDate(details.createdAt)
+        }
+      ];
+    }
+
+    if (
+      lowerType.includes('data') ||
+      lowerType.includes('approved') ||
+      details.submitterName !== undefined ||
+      details.category !== undefined
+    ) {
+      return [
+        { label: lang === 'ar' ? 'العنوان' : 'Title', value: text(details.title) },
+        { label: lang === 'ar' ? 'المشروع' : 'Project', value: text(details.projectName) },
+        { label: lang === 'ar' ? 'الموقع' : 'Site', value: text(details.siteName) },
+        { label: lang === 'ar' ? 'التصنيف' : 'Category', value: text(details.category) },
+        { label: lang === 'ar' ? 'الحالة' : 'Status', value: translateStatusLabel(details.status) },
+        {
+          label: lang === 'ar' ? 'مُقدَّم بواسطة' : 'Submitted by',
+          value: text(details.submitterName)
+        },
+        {
+          label: lang === 'ar' ? 'تاريخ الإرسال' : 'Submitted at',
+          value: formatDrawerDate(details.submittedAt)
+        },
+        {
+          label: lang === 'ar' ? 'تاريخ الاعتماد' : 'Approved at',
+          value: formatDrawerDate(details.approvedAt)
+        },
+        { label: lang === 'ar' ? 'الإصدار' : 'Version', value: text(details.version) }
+      ];
+    }
+
+    // Generic readable fallback (skip technical ids)
+    const skip = new Set(['id', 'projectId', 'siteId', 'userId', 'assignedToUserId', 'submittedBy', 'entityId']);
+    return Object.entries(details)
+      .filter(([k, v]) => !skip.has(k) && v !== null && v !== undefined && typeof v !== 'object')
+      .map(([k, v]) => ({
+        label: k
+          .replace(/([A-Z])/g, ' $1')
+          .replace(/^./, (c) => c.toUpperCase())
+          .trim(),
+        value:
+          typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)
+            ? formatDrawerDate(v)
+            : text(v)
+      }));
   };
 
   const getMemberPresence = (member?: ConversationMember | null) => {
@@ -948,29 +1151,104 @@ export default function Home() {
     });
   };
 
-  // Engineer Submit Data
+  // Engineer Submit Data — normal fields (not JSON) + device file picker
   const handleSubmitData = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProjectId || selectedProjectSites.length === 0) {
-      alert('Please select a project with at least one assigned site.');
+    if (!selectedProjectId) {
+      alert(lang === 'ar' ? 'اختر مشروعاً أولاً' : 'Please select a project first.');
       return;
     }
+    const siteId = submitSiteId || selectedProjectSites[0]?.id;
+    if (!siteId) {
+      alert(
+        lang === 'ar'
+          ? 'لا يوجد موقع مرتبط. أضف موقعاً للمشروع أو اختر مشروعاً فيه مواقع.'
+          : 'No site available. Add a site to the project first.'
+      );
+      return;
+    }
+    if (!submitTitle.trim() || !submitWorkDone.trim()) {
+      alert(
+        lang === 'ar'
+          ? 'اكتب عنوان التقرير والأعمال المنفذة.'
+          : 'Enter report title and work done.'
+      );
+      return;
+    }
+
     try {
+      setUploadingFiles(true);
+      const mediaIds: string[] = [];
+      for (const item of uploadedFiles) {
+        if (item.id) {
+          mediaIds.push(item.id);
+          continue;
+        }
+        if (item.file) {
+          const uploaded = await mediaService.uploadFile(item.file, {
+            projectId: selectedProjectId,
+            siteId,
+            entityType: 'ProjectData'
+          });
+          mediaIds.push(uploaded.id);
+        }
+      }
+
+      const descriptionLines = [
+        `${lang === 'ar' ? 'التصنيف' : 'Category'}: ${submitCategory}`,
+        `${lang === 'ar' ? 'الطقس' : 'Weather'}: ${submitWeather.trim() || '—'}`,
+        `${lang === 'ar' ? 'عدد العمالة' : 'Crew count'}: ${submitCrewCount.trim() || '—'}`,
+        `${lang === 'ar' ? 'الأعمال المنفذة' : 'Work done'}: ${submitWorkDone.trim()}`,
+        submitNotes.trim()
+          ? `${lang === 'ar' ? 'ملاحظات' : 'Notes'}: ${submitNotes.trim()}`
+          : null
+      ].filter(Boolean);
+
       const record = await dataRecordService.createRecord({
         projectId: selectedProjectId,
-        siteId: selectedProjectSites[0].id,
-        title: submitTitle,
-        category: submitCategory,
-        dataPayloadJson: submitPayload
+        siteId,
+        title: submitTitle.trim(),
+        description: descriptionLines.join('\n'),
+        submitDirectly: true,
+        attachmentMediaIds: mediaIds
       });
-      await dataRecordService.submitRecord(record.id);
-      setSubmitSuccess(`Report "${submitTitle}" submitted successfully for Admin review!`);
+
+      // Already submitted directly; call submit only if still draft
+      if ((record as any).status === 'Draft') {
+        await dataRecordService.submitRecord(record.id);
+      }
+
+      setSubmitSuccess(
+        lang === 'ar'
+          ? `تم إرسال التقرير "${submitTitle}" لمراجعة الأدمن`
+          : `Report "${submitTitle}" submitted for Admin review`
+      );
       setSubmitTitle('');
+      setSubmitWeather('');
+      setSubmitCrewCount('');
+      setSubmitWorkDone('');
+      setSubmitNotes('');
       setUploadedFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => {});
       setTimeout(() => setSubmitSuccess(''), 5000);
     } catch (err: any) {
-      alert(err?.message || 'Failed to submit data');
+      alert(err?.message || (lang === 'ar' ? 'فشل إرسال التقرير' : 'Failed to submit data'));
+    } finally {
+      setUploadingFiles(false);
     }
+  };
+
+  const handleReportFilesSelected = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const next = Array.from(files).map((file) => ({
+      name: file.name,
+      size: file.size > 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+        : `${Math.max(1, Math.round(file.size / 1024))} KB`,
+      file
+    }));
+    setUploadedFiles((prev) => [...prev, ...next]);
   };
 
   // Task Center Actions
@@ -1041,12 +1319,29 @@ export default function Home() {
   };
 
   const handleTaskStatusChange = async (taskId: string, newStatus: string) => {
+    const previous = tasks.find((tk) => tk.id === taskId)?.status;
+    // Optimistic UI so the engineer sees the change immediately
+    setTasks((prev) =>
+      prev.map((tk) => (tk.id === taskId ? { ...tk, status: newStatus as any } : tk))
+    );
     try {
       await taskService.updateStatus(taskId, newStatus);
       const updated = await taskService.getTasks();
       setTasks(updated);
+      const roles = authService.getCurrentUser()?.roles || [];
+      if (roles.includes('Admin') || roles.includes('SystemAdmin')) {
+        dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+      } else {
+        dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
+      }
     } catch (err: any) {
-      alert(err?.message || 'Failed to update status');
+      // Revert on failure
+      if (previous !== undefined) {
+        setTasks((prev) =>
+          prev.map((tk) => (tk.id === taskId ? { ...tk, status: previous } : tk))
+        );
+      }
+      alert(err?.message || (lang === 'ar' ? 'فشل تحديث حالة المهمة' : 'Failed to update status'));
     }
   };
 
@@ -2285,11 +2580,11 @@ export default function Home() {
                             </div>
                           </div>
 
-                          {r.dataPayloadJson && (
-                            <div className="p-3 rounded-xl bg-slate-800/45 border border-slate-600/50 text-xs font-mono text-emerald-400 overflow-x-auto">
-                              <pre>{r.dataPayloadJson}</pre>
+                          {(r as any).description || r.dataPayloadJson ? (
+                            <div className="p-3 rounded-xl bg-slate-800/45 border border-slate-600/50 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed">
+                              {(r as any).description || r.dataPayloadJson}
                             </div>
-                          )}
+                          ) : null}
 
                           <div className="pt-2 border-t border-slate-600/50 flex items-center justify-between gap-4">
                             <input
@@ -2360,7 +2655,10 @@ export default function Home() {
                             <label className="block text-xs font-semibold text-slate-300 mb-1">{t('targetProject')}</label>
                             <select
                               value={selectedProjectId || ''}
-                              onChange={(e) => selectProject(e.target.value)}
+                              onChange={(e) => {
+                                selectProject(e.target.value);
+                                setSubmitSiteId('');
+                              }}
                               className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                             >
                               {projects.map((p) => (
@@ -2372,57 +2670,164 @@ export default function Home() {
                           </div>
 
                           <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">{t('reportSelectSite')}</label>
+                            <select
+                              value={submitSiteId || selectedProjectSites[0]?.id || ''}
+                              onChange={(e) => setSubmitSiteId(e.target.value)}
+                              className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                            >
+                              {selectedProjectSites.length === 0 ? (
+                                <option value="">
+                                  {lang === 'ar' ? 'لا توجد مواقع' : 'No sites'}
+                                </option>
+                              ) : (
+                                selectedProjectSites.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {s.code} - {s.name}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
                             <label className="block text-xs font-semibold text-slate-300 mb-1">{t('dataCategory')}</label>
                             <select
                               value={submitCategory}
                               onChange={(e) => setSubmitCategory(e.target.value)}
                               className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                             >
-                              <option value="DailyReport">Daily Report</option>
-                              <option value="SiteReport">Site Report</option>
-                              <option value="InspectionReport">Inspection Report</option>
-                              <option value="EquipmentData">Equipment Data</option>
-                              <option value="MaterialData">Material Data</option>
-                              <option value="Measurements">Measurements</option>
+                              <option value="DailyReport">{lang === 'ar' ? 'تقرير يومي' : 'Daily Report'}</option>
+                              <option value="SiteReport">{lang === 'ar' ? 'تقرير موقع' : 'Site Report'}</option>
+                              <option value="InspectionReport">{lang === 'ar' ? 'تقرير معاينة' : 'Inspection Report'}</option>
+                              <option value="EquipmentData">{lang === 'ar' ? 'بيانات معدات' : 'Equipment Data'}</option>
+                              <option value="MaterialData">{lang === 'ar' ? 'بيانات مواد' : 'Material Data'}</option>
+                              <option value="Measurements">{lang === 'ar' ? 'قياسات' : 'Measurements'}</option>
                             </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">{t('submissionTitle')}</label>
+                            <input
+                              type="text"
+                              value={submitTitle}
+                              onChange={(e) => setSubmitTitle(e.target.value)}
+                              placeholder={lang === 'ar' ? 'مثال: صب خرسانة — محور أ' : 'e.g. Concrete casting — Sector A'}
+                              required
+                              className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">{t('reportWeather')}</label>
+                            <input
+                              type="text"
+                              value={submitWeather}
+                              onChange={(e) => setSubmitWeather(e.target.value)}
+                              placeholder={lang === 'ar' ? 'صافي / غائم / ممطر...' : 'Clear / Cloudy / Rainy...'}
+                              className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 mb-1">{t('reportCrewCount')}</label>
+                            <input
+                              type="text"
+                              inputMode="numeric"
+                              value={submitCrewCount}
+                              onChange={(e) => setSubmitCrewCount(e.target.value)}
+                              placeholder={lang === 'ar' ? 'مثال: 14' : 'e.g. 14'}
+                              className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                            />
                           </div>
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-slate-300 mb-1">{t('submissionTitle')}</label>
-                          <input
-                            type="text"
-                            value={submitTitle}
-                            onChange={(e) => setSubmitTitle(e.target.value)}
-                            placeholder="e.g. Soil Foundation Settlement - Sector A"
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">{t('reportWorkDone')}</label>
+                          <textarea
+                            value={submitWorkDone}
+                            onChange={(e) => setSubmitWorkDone(e.target.value)}
+                            rows={3}
                             required
+                            placeholder={
+                              lang === 'ar'
+                                ? 'اكتب الأعمال المنفذة اليوم...'
+                                : 'Describe the work completed today...'
+                            }
                             className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-slate-300 mb-1">{t('dataPayload')}</label>
+                          <label className="block text-xs font-semibold text-slate-300 mb-1">{t('reportNotes')}</label>
                           <textarea
-                            value={submitPayload}
-                            onChange={(e) => setSubmitPayload(e.target.value)}
-                            rows={4}
-                            className="w-full px-3 py-2 bg-slate-800/70 border border-slate-600/50 rounded-xl font-mono text-xs text-emerald-400"
+                            value={submitNotes}
+                            onChange={(e) => setSubmitNotes(e.target.value)}
+                            rows={2}
+                            placeholder={lang === 'ar' ? 'ملاحظات اختيارية...' : 'Optional notes...'}
+                            className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
                           />
                         </div>
 
-                        {/* File Upload Dropzone (Prompt 20) */}
-                        <div className="border-2 border-dashed border-slate-600/50 hover:border-mti-300 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-800/55/70">
-                          <Upload className="w-6 h-6 text-slate-500 mx-auto mb-1" />
-                          <div className="text-xs text-slate-300 font-medium">{t('attachFiles')}</div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">{t('attachSubtext')}</div>
-                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          multiple
+                          accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls,.doc,.docx,image/*,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            handleReportFilesSelected(e.target.files);
+                            e.target.value = '';
+                          }}
+                        />
+
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="w-full border-2 border-dashed border-slate-600/50 hover:border-cyan-400/50 rounded-xl p-4 text-center transition-colors bg-slate-800/55"
+                        >
+                          <Upload className="w-6 h-6 text-cyan-300 mx-auto mb-1" />
+                          <div className="text-xs text-slate-200 font-medium">{t('attachFiles')}</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">{t('attachSubtext')}</div>
+                        </button>
+
+                        {uploadedFiles.length > 0 && (
+                          <ul className="space-y-1.5">
+                            {uploadedFiles.map((f, idx) => (
+                              <li
+                                key={`${f.name}-${idx}`}
+                                className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-800/70 border border-slate-600/40 text-xs text-slate-200"
+                              >
+                                <span className="truncate">
+                                  {f.name} <span className="text-slate-400">({f.size})</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setUploadedFiles((prev) => prev.filter((_, i) => i !== idx))
+                                  }
+                                  className="text-rose-300 hover:text-rose-200 flex-shrink-0"
+                                >
+                                  {lang === 'ar' ? 'حذف' : 'Remove'}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
 
                         <div className="flex items-center justify-end gap-2 pt-2">
                           <button
                             type="submit"
-                            className="px-4 py-2 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold flex items-center gap-1.5"
+                            disabled={uploadingFiles}
+                            className="px-4 py-2 rounded-xl bg-mti-600 hover:bg-mti-500 disabled:opacity-60 text-white text-xs font-semibold flex items-center gap-1.5"
                           >
-                            <Send className="w-3.5 h-3.5" />
+                            {uploadingFiles ? (
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Send className="w-3.5 h-3.5" />
+                            )}
                             {t('submitReportBtn')}
                           </button>
                         </div>
@@ -3229,24 +3634,44 @@ export default function Home() {
       {drawerData && (
         <div className="fixed inset-0 z-50 overflow-hidden">
           <div className="absolute inset-0 bg-slate-900/25 backdrop-blur-sm" onClick={() => setDrawerData(null)} />
-          <div className="fixed inset-y-0 right-0 max-w-md w-full bg-slate-800/45 border-l border-slate-600/50 p-6 flex flex-col shadow-xl space-y-4">
+          <div className="fixed inset-y-0 end-0 max-w-md w-full bg-[#152438] border-s border-cyan-400/25 p-6 flex flex-col shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-600/50 pb-3">
               <div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-700/45 text-cyan-300">
-                  {drawerData.type}
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300">
+                  {getDrawerTypeLabel(drawerData.type)}
                 </span>
                 <h3 className="font-bold text-slate-100 text-base mt-1">{drawerData.title}</h3>
               </div>
-              <button onClick={() => setDrawerData(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-100">
+              <button
+                type="button"
+                onClick={() => setDrawerData(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-100"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-3 text-xs text-slate-300">
-              <pre className="p-3 rounded-xl bg-slate-800/70 border border-slate-600/50 font-mono text-[11px] text-emerald-400 overflow-x-auto">
-                {JSON.stringify(drawerData.details, null, 2)}
-              </pre>
+            <div className="flex-1 overflow-y-auto space-y-2 text-sm">
+              {getDrawerFields(drawerData.type, drawerData.details).map((row) => (
+                <div
+                  key={row.label}
+                  className="rounded-xl bg-[#1a2f4a]/80 border border-cyan-400/15 px-3.5 py-2.5"
+                >
+                  <div className="text-[11px] text-slate-400 mb-0.5">{row.label}</div>
+                  <div className="text-slate-100 font-medium leading-relaxed break-words">
+                    {row.value}
+                  </div>
+                </div>
+              ))}
             </div>
+
+            <button
+              type="button"
+              onClick={() => setDrawerData(null)}
+              className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white text-sm font-semibold"
+            >
+              {lang === 'ar' ? 'إغلاق' : 'Close'}
+            </button>
           </div>
         </div>
       )}

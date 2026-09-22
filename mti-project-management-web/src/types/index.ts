@@ -100,6 +100,7 @@ export interface TaskItem {
 export interface ProjectDataRecord {
   id: string;
   title: string;
+  description?: string;
   category: DataCategory;
   status: DataRecordStatus;
   projectId: string;

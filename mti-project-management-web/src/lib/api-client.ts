@@ -34,7 +34,14 @@ class ApiClient {
     const url = `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
     const headers = new Headers(options.headers || {});
 
-    headers.set('Content-Type', 'application/json');
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    if (!isFormData && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json');
+    }
+    // For FormData, let the browser set multipart boundary automatically
+    if (isFormData && headers.has('Content-Type')) {
+      headers.delete('Content-Type');
+    }
 
     const token = this.getAccessToken();
     if (token && !headers.has('Authorization')) {
@@ -72,9 +79,14 @@ class ApiClient {
 
     if (!response.ok) {
       logger.log('ERROR', `HTTP [${response.status}] ${endpoint}: ${data?.message || response.statusText}`, data, 'error');
+      const message =
+        data?.message
+        || (response.status === 403
+          ? 'ليس لديك صلاحية لهذا الإجراء. سجّل دخول بحساب Admin.'
+          : `Request failed with status ${response.status}`);
       return {
         success: false,
-        message: data?.message || `Request failed with status ${response.status}`,
+        message,
         data: null as unknown as T,
         errors: data?.errors || [response.statusText],
       };
@@ -125,6 +137,14 @@ class ApiClient {
       ...options,
       method: 'POST',
       body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  public uploadForm<T>(endpoint: string, formData: FormData, options?: RequestInit): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      ...options,
+      method: 'POST',
+      body: formData,
     });
   }
 
