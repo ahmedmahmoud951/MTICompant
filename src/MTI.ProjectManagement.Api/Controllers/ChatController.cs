@@ -153,12 +153,24 @@ public class ChatController : ControllerBase
                 fullName = $"{u.FirstName} {u.LastName}",
                 email = u.Email,
                 jobTitle = u.JobTitle,
-                role = u.UserRoles.Select(ur => ur.Role.Name).FirstOrDefault() ?? "Member"
+                role = u.UserRoles.Select(ur => ur.Role.Name).FirstOrDefault() ?? "Member",
+                lastLoginAt = u.LastLoginAt
             })
             .Take(40)
             .ToListAsync(cancellationToken);
 
-        return Ok(users);
+        var result = users.Select(u => new
+        {
+            u.id,
+            u.fullName,
+            u.email,
+            u.jobTitle,
+            u.role,
+            lastSeenAt = UserPresenceTracker.GetLastSeen(u.id) ?? u.lastLoginAt,
+            isOnline = UserPresenceTracker.IsOnline(u.id)
+        });
+
+        return Ok(result);
     }
 
     [HttpPost("conversations/direct")]

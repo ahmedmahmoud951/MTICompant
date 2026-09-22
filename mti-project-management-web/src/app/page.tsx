@@ -3044,14 +3044,14 @@ export default function Home() {
 
       {/* Start Direct Chat Modal / User Search */}
       {showNewChatModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#1a2f4a] border-2 border-cyan-400/25 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl animate-fade-up">
-            <div className="flex items-center justify-between pb-3 border-b-2 border-cyan-400/20">
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#152438] border-2 border-cyan-400/40 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl animate-fade-up">
+            <div className="flex items-center justify-between pb-3 border-b-2 border-cyan-400/30">
               <div className="flex items-center gap-2">
                 <MessageSquare className="w-5 h-5 text-cyan-300" />
                 <div>
-                  <h3 className="font-bold text-slate-100 text-sm">{t('startChat')}</h3>
-                  <p className="text-[11px] text-slate-300">
+                  <h3 className="font-bold text-white text-base">{t('startChat')}</h3>
+                  <p className="text-xs text-slate-200 mt-0.5">
                     {lang === 'ar'
                       ? 'ابحث عن شخص وابدأ محادثة — هتتحفظ باسمه في القائمة'
                       : 'Find someone to chat — saved by name in the list'}
@@ -3060,81 +3060,109 @@ export default function Home() {
               </div>
               <button
                 onClick={() => setShowNewChatModal(false)}
-                className="p-1 rounded-lg hover:bg-slate-700/50 text-slate-300 hover:text-slate-100 transition-colors"
+                className="p-1.5 rounded-lg bg-slate-700/80 hover:bg-slate-600 text-white transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="relative">
-              <Search className="w-4 h-4 text-slate-300 absolute start-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-5 h-5 text-cyan-300 absolute start-3 top-1/2 -translate-y-1/2" strokeWidth={2.4} />
               <input
                 type="text"
                 value={chatSearchUser}
                 onChange={(e) => setChatSearchUser(e.target.value)}
                 placeholder={t('searchUsersChat')}
                 autoFocus
-                className="w-full ps-9 pe-4 py-3 bg-[#1a2d45] border-2 border-cyan-400/30 rounded-xl text-slate-100 text-sm placeholder:text-slate-400 focus:outline-none focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                className="w-full ps-11 pe-4 py-3.5 bg-[#0f1c2e] border-2 border-cyan-400/50 rounded-xl text-white text-sm font-medium placeholder:text-slate-300 focus:outline-none focus:border-cyan-300 focus:ring-2 focus:ring-cyan-400/30"
               />
             </div>
 
-            <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
               {loadingContacts ? (
-                <div className="py-8 text-center text-xs text-slate-300 flex items-center justify-center gap-2">
-                  <RefreshCw className="w-4 h-4 animate-spin text-cyan-400" />
+                <div className="py-8 text-center text-sm text-slate-200 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-cyan-300" />
                   <span>{t('loading')}</span>
                 </div>
               ) : chatContacts.length === 0 ? (
-                <div className="py-8 text-center text-xs text-slate-300">
+                <div className="py-8 text-center text-sm text-slate-200">
                   {lang === 'ar' ? 'لم يتم العثور على مستخدمين بهذا الاسم' : 'No users found'}
                 </div>
               ) : (
-                chatContacts.map((contact) => (
-                  <div
-                    key={contact.id}
-                    onClick={() => handleStartDirectChat(contact)}
-                    className="p-3 rounded-xl bg-[#1e334f] hover:bg-cyan-500/15 border-2 border-cyan-400/18 hover:border-cyan-400/40 transition-all cursor-pointer flex items-center justify-between group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-full bg-cyan-500 text-white flex items-center justify-center font-bold text-sm flex-shrink-0 shadow-sm">
-                        {(contact.fullName || 'U')[0]}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-xs text-slate-100 group-hover:text-cyan-300 transition-colors truncate">
-                            {contact.fullName}
-                          </span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-200 border border-slate-400 text-slate-200 font-mono flex-shrink-0">
-                            {contact.role}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px] text-slate-300 mt-0.5">
-                          {contact.jobTitle && (
-                            <span className="text-cyan-300 font-medium truncate">{contact.jobTitle}</span>
-                          )}
-                          {contact.jobTitle && <span className="text-slate-400">•</span>}
-                          <span className="truncate">{contact.email}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleStartDirectChat(contact);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-white text-xs font-semibold flex items-center gap-1 transition-colors flex-shrink-0 shadow-sm"
+                chatContacts.map((contact) => {
+                  const presence = getMemberPresence({
+                    userId: String(contact.id),
+                    userName: contact.fullName || '',
+                    userEmail: contact.email || '',
+                    role: contact.role || '',
+                    lastSeenAt: contact.lastSeenAt,
+                    isOnline: contact.isOnline,
+                  });
+                  return (
+                    <div
+                      key={contact.id}
+                      onClick={() => handleStartDirectChat(contact)}
+                      className="p-3.5 rounded-xl bg-[#1e334f] hover:bg-[#25405c] border-2 border-slate-500/50 hover:border-cyan-400/60 transition-all cursor-pointer flex items-center justify-between gap-3 group"
                     >
-                      <span>{lang === 'ar' ? 'محادثة' : 'Chat'}</span>
-                    </button>
-                  </div>
-                ))
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="relative flex-shrink-0">
+                          <div className="w-11 h-11 rounded-full bg-cyan-500 text-white flex items-center justify-center font-bold text-base shadow-sm">
+                            {(contact.fullName || 'U')[0]}
+                          </div>
+                          <span
+                            className={`absolute -bottom-0.5 -end-0.5 w-3 h-3 rounded-full border-2 border-[#1e334f] ${
+                              presence.isOnline ? 'bg-emerald-400' : 'bg-slate-500'
+                            }`}
+                          />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-sm text-white truncate">
+                              {contact.fullName}
+                            </span>
+                            {contact.role && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-md bg-cyan-500/25 border border-cyan-400/40 text-cyan-100 font-semibold flex-shrink-0">
+                                {contact.role}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-slate-200 mt-1 flex-wrap">
+                            {contact.jobTitle && (
+                              <span className="text-cyan-200 font-semibold truncate">{contact.jobTitle}</span>
+                            )}
+                            {contact.jobTitle && <span className="text-slate-400">•</span>}
+                            <span className="truncate text-slate-200">{contact.email}</span>
+                          </div>
+                          <div
+                            className={`text-[11px] mt-0.5 font-medium ${
+                              presence.isOnline ? 'text-emerald-400' : 'text-slate-400'
+                            }`}
+                          >
+                            {presence.isOnline
+                              ? t('online')
+                              : `${t('lastSeen')}: ${formatLastSeen(presence.lastSeenAt, false)}`}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartDirectChat(contact);
+                        }}
+                        className="px-3.5 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-white text-sm font-bold flex items-center gap-1 transition-colors flex-shrink-0 shadow-md"
+                      >
+                        <span>{lang === 'ar' ? 'محادثة' : 'Chat'}</span>
+                      </button>
+                    </div>
+                  );
+                })
               )}
             </div>
 
-            <div className="flex justify-end pt-2 border-t-2 border-cyan-400/20">
+            <div className="flex justify-end pt-2 border-t-2 border-cyan-400/30">
               <button
                 onClick={() => setShowNewChatModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-100 text-xs font-medium transition-colors"
+                className="px-5 py-2.5 rounded-xl bg-slate-600 hover:bg-slate-500 text-white text-sm font-semibold border border-slate-400/40 transition-colors"
               >
                 {t('close')}
               </button>
