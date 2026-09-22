@@ -14,7 +14,7 @@ COPY mti-project-management-web ./
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
-RUN npm run build
+RUN node ./node_modules/next/dist/bin/next build
 
 # Runner Stage
 FROM base AS runner
@@ -32,4 +32,4 @@ COPY --from=builder /app/package.json ./package.json
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start"]
+CMD ["node", "./node_modules/next/dist/bin/next", "start", "-p", "3000"]
