@@ -17,6 +17,7 @@ public record UserDto(
     string LastName,
     string FullName,
     string? PhoneNumber,
+    string? JobTitle,
     bool IsActive,
     List<string> Roles,
     List<string> Permissions

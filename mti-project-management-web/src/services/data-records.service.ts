@@ -4,8 +4,10 @@ import { ProjectDataRecord } from '@/types';
 export const dataRecordService = {
   async getRecords(status?: string): Promise<ProjectDataRecord[]> {
     const query = status ? `?status=${status}` : '';
-    const res = await apiClient.get<ProjectDataRecord[]>(`/api/projectdata${query}`);
-    return res.data || [];
+    const res = await apiClient.get<any>(`/api/projectdata${query}`);
+    if (Array.isArray(res.data)) return res.data;
+    if (res.data && Array.isArray(res.data.items)) return res.data.items;
+    return [];
   },
 
   async getPendingApprovals(): Promise<ProjectDataRecord[]> {

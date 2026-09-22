@@ -134,6 +134,7 @@ public class AuthController : ControllerBase
             user.LastName,
             user.FullName,
             user.PhoneNumber,
+            user.JobTitle,
             user.IsActive,
             roles,
             permissions
@@ -208,6 +209,7 @@ public class AuthController : ControllerBase
             token.User.LastName,
             token.User.FullName,
             token.User.PhoneNumber,
+            token.User.JobTitle,
             token.User.IsActive,
             roles,
             permissions
@@ -279,6 +281,7 @@ public class AuthController : ControllerBase
             user.LastName,
             user.FullName,
             user.PhoneNumber,
+            user.JobTitle,
             user.IsActive,
             roles,
             permissions

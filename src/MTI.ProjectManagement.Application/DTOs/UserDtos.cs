@@ -6,6 +6,7 @@ public record AdminUserDto(
     string LastName,
     string Email,
     string? PhoneNumber,
+    string? JobTitle,
     bool IsActive,
     List<string> Roles,
     DateTime CreatedAt,
@@ -18,6 +19,7 @@ public record CreateUserRequest(
     string Email,
     string Password,
     string? PhoneNumber,
+    string? JobTitle = null,
     string Role = "Engineer"
 );
 
@@ -25,7 +27,8 @@ public record UpdateUserRequest(
     string FirstName,
     string LastName,
     string? PhoneNumber,
-    bool IsActive,
+    string? JobTitle = null,
+    bool IsActive = true,
     List<string>? Roles = null
 );
 

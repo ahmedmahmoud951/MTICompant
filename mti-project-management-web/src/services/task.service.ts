@@ -7,8 +7,10 @@ export const taskService = {
     if (projectId) params.append('projectId', projectId);
     if (siteId) params.append('siteId', siteId);
     const query = params.toString() ? `?${params.toString()}` : '';
-    const res = await apiClient.get<TaskItem[]>(`/api/tasks${query}`);
-    return res.data || [];
+    const res = await apiClient.get<any>(`/api/tasks${query}`);
+    if (Array.isArray(res.data)) return res.data;
+    if (res.data && Array.isArray(res.data.items)) return res.data.items;
+    return [];
   },
 
   async createTask(payload: {

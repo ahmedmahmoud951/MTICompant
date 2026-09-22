@@ -9,6 +9,7 @@ public class User : FullAuditedEntity
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string? PhoneNumber { get; set; }
+    public string? JobTitle { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime? LockoutEnd { get; set; }
     public int AccessFailedCount { get; set; }

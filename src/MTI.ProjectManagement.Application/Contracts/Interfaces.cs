@@ -110,4 +110,6 @@ public interface INotificationService
     Task BroadcastToUserAsync(Guid userId, string eventName, object payload, CancellationToken cancellationToken = default);
     Task BroadcastToProjectAsync(Guid projectId, string eventName, object payload, CancellationToken cancellationToken = default);
     Task BroadcastToSiteAsync(Guid siteId, string eventName, object payload, CancellationToken cancellationToken = default);
+    Task BroadcastToAdminsAsync(string eventName, object payload, CancellationToken cancellationToken = default);
+    Task BroadcastGlobalAsync(string eventName, object payload, CancellationToken cancellationToken = default);
 }

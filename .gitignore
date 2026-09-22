@@ -39,3 +39,6 @@ Desktop.ini
 
 # Test results
 **/TestResults/
+
+# TypeScript build cache
+**/*.tsbuildinfo

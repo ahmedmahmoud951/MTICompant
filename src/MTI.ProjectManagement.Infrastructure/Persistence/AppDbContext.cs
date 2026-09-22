@@ -76,6 +76,7 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.Property(e => e.FirstName).HasMaxLength(100).IsRequired();
             entity.Property(e => e.LastName).HasMaxLength(100).IsRequired();
             entity.Property(e => e.PhoneNumber).HasMaxLength(30);
+            entity.Property(e => e.JobTitle).HasMaxLength(150);
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 

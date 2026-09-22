@@ -268,7 +268,7 @@ public static class DatabaseSeeder
         {
             ("SignalR", "HubEnabled", "true", "boolean", "Enables or disables real-time SignalR hubs"),
             ("SignalR", "HubPath", "/hubs/project", "string", "Relative path to project SignalR hub"),
-            ("SignalR", "HubUrl", "", "string", "Absolute SignalR Hub URL if external"),
+            ("SignalR", "HubUrl", "https://mtiapi.runasp.net/hubs/project", "string", "Absolute SignalR Hub URL if external"),
             ("SignalR", "ReconnectEnabled", "true", "boolean", "Whether client should automatically reconnect"),
             ("SignalR", "AllowedOrigins", "http://localhost:3000,http://localhost:3001", "string", "Allowed CORS origins for SignalR"),
             ("Security", "MaxFailedLogins", "5", "int", "Maximum failed logins before account lockout"),

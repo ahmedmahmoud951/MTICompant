@@ -146,12 +146,15 @@ using (var scope = app.Services.CreateScope())
 app.UseMiddleware<SecurityHeadersMiddleware>();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+app.UseStaticFiles();
+
 // Always enable Swagger UI in Development and Production
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "MTI Project Management API v1");
     c.RoutePrefix = "swagger";
+    c.HeadContent = "<style>.swagger-ui .topbar { background-color: #0b0f19 !important; border-bottom: 2px solid #0284c7; } .swagger-ui .topbar .topbar-wrapper a svg { display: none !important; } .swagger-ui .topbar .topbar-wrapper a::before { content: ''; display: inline-block; background-image: url('/images/CompanyLogo.png'); background-size: contain; background-repeat: no-repeat; width: 150px; height: 44px; vertical-align: middle; }</style>";
 });
 
 // Friendly browser inspection for SignalR hubs (runs before routing to prevent 401 when clicking in browser)
@@ -395,11 +398,37 @@ static string GetMtiLandingHtml()
             border-top: 1px solid var(--border-color);
             padding-top: 1.5rem;
         }
+        .logo-container {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1.25rem 2.25rem;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 1.5rem;
+            box-shadow: 0 15px 35px -5px rgba(2, 132, 199, 0.35);
+            backdrop-filter: blur(16px);
+            margin-bottom: 1.5rem;
+            transition: transform 0.3s ease;
+        }
+        .logo-container:hover {
+            transform: translateY(-3px) scale(1.02);
+        }
+        .brand-logo {
+            height: 90px;
+            width: auto;
+            object-fit: contain;
+            filter: drop-shadow(0 6px 20px rgba(2, 132, 199, 0.45));
+        }
     </style>
 </head>
 <body>
     <div class=""container"">
         <header class=""header"">
+            <div class=""logo-container"">
+                <img src=""/images/CompanyLogo.png"" alt=""MTI Engineering Solutions"" class=""brand-logo"" />
+            </div>
+            <br>
             <div class=""badge-online"">
                 <span class=""pulse-dot""></span>
                 السيرفر يعمل بكفاءة (Online)

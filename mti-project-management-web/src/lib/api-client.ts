@@ -1,4 +1,5 @@
 import { ApiResponse } from '@/types';
+import { logger } from './logger';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5241';
 
@@ -40,6 +41,9 @@ class ApiClient {
       headers.set('Authorization', `Bearer ${token}`);
     }
 
+    const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const method = options.method || 'GET';
+
     let response = await fetch(url, { ...options, headers });
 
     // Handle Token Expiry & Automatic Refresh
@@ -56,6 +60,9 @@ class ApiClient {
       }
     }
 
+    const durationMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - startTime);
+    logger.http(method, endpoint, response.status, durationMs);
+
     const data = await response.json().catch(() => ({
       success: false,
       message: `HTTP Error ${response.status}: ${response.statusText}`,
@@ -64,6 +71,7 @@ class ApiClient {
     }));
 
     if (!response.ok) {
+      logger.log('ERROR', `HTTP [${response.status}] ${endpoint}: ${data?.message || response.statusText}`, data, 'error');
       return {
         success: false,
         message: data?.message || `Request failed with status ${response.status}`,
@@ -134,3 +142,4 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient();
+export { API_BASE_URL };

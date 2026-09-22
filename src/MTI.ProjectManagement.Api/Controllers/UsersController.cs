@@ -60,6 +60,7 @@ public class UsersController : ControllerBase
                 u.LastName,
                 u.Email,
                 u.PhoneNumber,
+                u.JobTitle,
                 u.IsActive,
                 u.UserRoles.Select(ur => ur.Role.Name).ToList(),
                 u.CreatedAt,
@@ -87,6 +88,7 @@ public class UsersController : ControllerBase
             user.LastName,
             user.Email,
             user.PhoneNumber,
+            user.JobTitle,
             user.IsActive,
             user.UserRoles.Select(ur => ur.Role.Name).ToList(),
             user.CreatedAt,
@@ -112,6 +114,7 @@ public class UsersController : ControllerBase
             Email = request.Email.Trim().ToLower(),
             PasswordHash = _passwordHasher.HashPassword(request.Password),
             PhoneNumber = request.PhoneNumber,
+            JobTitle = request.JobTitle,
             IsActive = true,
             CreatedBy = adminId
         };
@@ -131,7 +134,7 @@ public class UsersController : ControllerBase
             "User",
             user.Id.ToString(),
             null,
-            new { user.Email, user.FirstName, user.LastName, Role = roleName },
+            new { user.Email, user.FirstName, user.LastName, user.JobTitle, Role = roleName },
             cancellationToken);
 
         return CreatedAtAction(nameof(GetById), new { id = user.Id }, new AdminUserDto(
@@ -140,6 +143,7 @@ public class UsersController : ControllerBase
             user.LastName,
             user.Email,
             user.PhoneNumber,
+            user.JobTitle,
             user.IsActive,
             new List<string> { roleName },
             user.CreatedAt,
@@ -165,6 +169,7 @@ public class UsersController : ControllerBase
         user.FirstName = request.FirstName;
         user.LastName = request.LastName;
         user.PhoneNumber = request.PhoneNumber;
+        if (request.JobTitle != null) user.JobTitle = request.JobTitle;
         user.IsActive = request.IsActive;
         user.UpdatedBy = adminId;
         user.UpdatedAt = DateTime.UtcNow;
@@ -188,7 +193,7 @@ public class UsersController : ControllerBase
             "User",
             user.Id.ToString(),
             null,
-            new { user.FirstName, user.LastName, user.IsActive, request.Roles },
+            new { user.FirstName, user.LastName, user.JobTitle, user.IsActive, request.Roles },
             cancellationToken);
 
         var updatedRoles = await _dbContext.UserRoles
@@ -202,6 +207,7 @@ public class UsersController : ControllerBase
             user.LastName,
             user.Email,
             user.PhoneNumber,
+            user.JobTitle,
             user.IsActive,
             updatedRoles,
             user.CreatedAt,

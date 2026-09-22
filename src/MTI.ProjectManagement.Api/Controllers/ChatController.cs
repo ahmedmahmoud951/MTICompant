@@ -104,6 +104,39 @@ public class ChatController : ControllerBase
         return Ok(list);
     }
 
+    [HttpGet("contacts")]
+    public async Task<ActionResult<List<object>>> GetContacts(
+        [FromQuery] string? search = null,
+        CancellationToken cancellationToken = default)
+    {
+        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdString, out var currentUserId)) return Unauthorized();
+
+        var query = _dbContext.Users
+            .AsNoTracking()
+            .Where(u => !u.IsDeleted && u.IsActive && u.Id != currentUserId);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim();
+            query = query.Where(u => u.FirstName.Contains(s) || u.LastName.Contains(s) || u.Email.Contains(s) || (u.JobTitle != null && u.JobTitle.Contains(s)));
+        }
+
+        var users = await query
+            .Select(u => new
+            {
+                id = u.Id,
+                fullName = $"{u.FirstName} {u.LastName}",
+                email = u.Email,
+                jobTitle = u.JobTitle,
+                role = u.UserRoles.Select(ur => ur.Role.Name).FirstOrDefault() ?? "Member"
+            })
+            .Take(40)
+            .ToListAsync(cancellationToken);
+
+        return Ok(users);
+    }
+
     [HttpPost("conversations/direct")]
     public async Task<ActionResult<ConversationSummaryDto>> StartDirectConversation(
         [FromBody] CreateDirectConversationDto dto,
@@ -192,8 +225,7 @@ public class ChatController : ControllerBase
         if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
 
         var isMember = await _dbContext.ConversationMembers.AnyAsync(m => m.ConversationId == id && m.UserId == userId, cancellationToken);
-        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin");
-        if (!isMember && !isAdmin) return Forbid();
+        if (!isMember) return Forbid();
 
         var query = _dbContext.Messages
             .AsNoTracking()
@@ -495,6 +527,9 @@ public class ChatController : ControllerBase
         var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
 
+        var isMember = await _dbContext.ConversationMembers.AnyAsync(m => m.ConversationId == id && m.UserId == userId, cancellationToken);
+        if (!isMember) return Forbid();
+
         var unreadMessages = await _dbContext.Messages
             .Where(m => m.ConversationId == id && !m.IsDeleted && m.SenderUserId != userId &&
                         !m.ReadStates.Any(rs => rs.UserId == userId))
@@ -528,5 +563,28 @@ public class ChatController : ControllerBase
         }
 
         return Ok(new { success = true, markedCount = unreadMessages.Count });
+    }
+
+    [HttpPost("messages/{id}/delivered")]
+    public async Task<IActionResult> MarkMessageDelivered(Guid id, CancellationToken cancellationToken)
+    {
+        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+
+        var msg = await _dbContext.Messages.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id && !m.IsDeleted, cancellationToken);
+        if (msg == null) return NotFound();
+
+        var isMember = await _dbContext.ConversationMembers.AnyAsync(m => m.ConversationId == msg.ConversationId && m.UserId == userId, cancellationToken);
+        if (!isMember) return Forbid();
+
+        await _hubContext.Clients.Group($"conversation:{msg.ConversationId}").SendAsync("MessageDelivered", new
+        {
+            messageId = id,
+            conversationId = msg.ConversationId,
+            recipientUserId = userId,
+            deliveredAt = DateTime.UtcNow
+        }, cancellationToken);
+
+        return Ok(new { success = true });
     }
 }

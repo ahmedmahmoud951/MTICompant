@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { authService } from '@/services/auth.service';
 import { projectService, siteService } from '@/services/project.service';
 import { signalRService } from '@/services/signalr.service';
@@ -8,6 +8,7 @@ import { chatService } from '@/services/chat.service';
 import { dashboardService } from '@/services/dashboard.service';
 import { dataRecordService } from '@/services/data-records.service';
 import { taskService } from '@/services/task.service';
+import { notificationService } from '@/services/notification.service';
 import {
   Project,
   Site,
@@ -19,13 +20,12 @@ import {
   AdminDashboardStats,
   EngineerDashboardStats,
   AuditLogItem,
-  SystemSafeConfig
+  SystemSafeConfig,
+  NotificationItem
 } from '@/types';
 import {
-  Building2,
   ShieldCheck,
   Radio,
-  HardHat,
   LogOut,
   MapPin,
   Plus,
@@ -53,15 +53,29 @@ import {
   ChevronLeft,
   UserCircle,
   LayoutDashboard,
-  Sparkles,
   Activity,
-  Briefcase
+  Briefcase,
+  Fingerprint,
+  Mail,
+  Eye,
+  EyeOff,
+  ArrowRight,
+  Menu,
+  Globe,
+  Check,
+  CheckCheck,
+  Clock,
+  MessageCircle
 } from 'lucide-react';
+import { Language, getTranslation, TranslationKey } from '@/lib/i18n';
+import { API_BASE_URL } from '@/lib/api-client';
+import { logger } from '@/lib/logger';
 
 export default function Home() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [signalRConnected, setSignalRConnected] = useState(false);
@@ -99,11 +113,48 @@ export default function Home() {
   const [submitSuccess, setSubmitSuccess] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<{ name: string; size: string }[]>([]);
 
-  // Real-Time Chat
+  // Real-Time Chat & WhatsApp Message Statuses
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const activeConversationRef = useRef<Conversation | null>(null);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [newMessageText, setNewMessageText] = useState('');
+  const [deliveredMessageIds, setDeliveredMessageIds] = useState<Set<string>>(new Set());
+
+  // Facebook Messenger & Notifications Dropdown in Topbar
+  const [showMessagesDropdown, setShowMessagesDropdown] = useState(false);
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const [chatSearchUser, setChatSearchUser] = useState('');
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [chatContacts, setChatContacts] = useState<any[]>([]);
+  const [loadingContacts, setLoadingContacts] = useState(false);
+
+  // Floating Toast Notifications (Tasks & Chat)
+  const [toasts, setToasts] = useState<
+    { id: string; title: string; message: string; type: 'chat' | 'task' | 'info'; linkTab?: string; conversationId?: string }[]
+  >([]);
+
+  const addToast = (
+    title: string,
+    message: string,
+    type: 'chat' | 'task' | 'info' = 'info',
+    linkTab?: string,
+    conversationId?: string
+  ) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, title, message, type, linkTab, conversationId }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 5000);
+  };
+
+  const totalUnreadMessages = useMemo(
+    () => conversations.reduce((acc, c) => acc + (c.unreadCount || 0), 0),
+    [conversations]
+  );
+
+  // Real-Time Notifications
+  const [notificationsList, setNotificationsList] = useState<NotificationItem[]>([]);
 
   // User Management
   const [userList, setUserList] = useState<any[]>([]);
@@ -112,7 +163,27 @@ export default function Home() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
   const [newUserRole, setNewUserRole] = useState('Engineer');
+  const [newUserJobTitle, setNewUserJobTitle] = useState('');
   const [showNewUserModal, setShowNewUserModal] = useState(false);
+
+  // Mobile & Tablet Responsive Navigation
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Bilingual / Internationalization (Arabic 🇪🇬 / English 🇺🇸)
+  const [lang, setLang] = useState<Language>('ar');
+
+  const t = (k: TranslationKey) => getTranslation(k, lang);
+
+  const toggleLanguage = () => {
+    const next: Language = lang === 'ar' ? 'en' : 'ar';
+    setLang(next);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('mti_lang', next);
+      document.documentElement.dir = next === 'ar' ? 'rtl' : 'ltr';
+      document.documentElement.lang = next;
+    }
+    logger.info('Language toggled', { language: next });
+  };
 
   // Audit Logs
   const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
@@ -166,6 +237,30 @@ export default function Home() {
   });
 
   useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
+
+  useEffect(() => {
+    if (showNewChatModal) {
+      setLoadingContacts(true);
+      const timer = setTimeout(() => {
+        chatService
+          .getContacts(chatSearchUser)
+          .then((data) => setChatContacts(data))
+          .catch(() => setChatContacts([]))
+          .finally(() => setLoadingContacts(false));
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [showNewChatModal, chatSearchUser]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedLang = (localStorage.getItem('mti_lang') as Language) || 'ar';
+      setLang(savedLang);
+      document.documentElement.dir = savedLang === 'ar' ? 'rtl' : 'ltr';
+      document.documentElement.lang = savedLang;
+    }
     const user = authService.getCurrentUser();
     if (user) {
       setCurrentUser(user);
@@ -179,17 +274,152 @@ export default function Home() {
       const conn = await signalRService.initialize();
       if (conn) {
         setSignalRConnected(true);
+
+        // Real-Time Chat Handlers
         conn.on('MessageSent', (msg: Message) => {
-          setChatMessages((prev) => [...prev, msg]);
+          const u = authService.getCurrentUser();
+          // 1. If recipient is me, acknowledge delivery to the hub
+          if (u && msg.senderUserId !== u.id) {
+            conn.invoke('AcknowledgeDelivery', msg.id, msg.conversationId).catch(() => {});
+            chatService.markAsDelivered(msg.id).catch(() => {});
+
+            // Show toast if conversation is not currently active
+            if (activeConversationRef.current?.id !== msg.conversationId) {
+              addToast(msg.senderName, msg.content, 'chat', 'chat', msg.conversationId);
+            }
+          }
+
+          if (activeConversationRef.current?.id === msg.conversationId) {
+            setChatMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+            if (u && msg.senderUserId !== u.id) {
+              chatService.markAsRead(msg.conversationId).catch(() => {});
+            }
+          }
+          chatService.getConversations().then(setConversations).catch(() => {});
         });
+
+        conn.on('MessageDelivered', (payload: { messageId: string; conversationId: string; recipientUserId: string }) => {
+          setDeliveredMessageIds((prev) => {
+            const next = new Set(prev);
+            next.add(payload.messageId);
+            return next;
+          });
+          setChatMessages((prev) =>
+            prev.map((m) => (m.id === payload.messageId ? { ...m, isDelivered: true, deliveryStatus: 'delivered' } : m))
+          );
+        });
+
         conn.on('MessageReactionAdded', () => {
-          if (activeConversation) loadMessages(activeConversation.id);
+          if (activeConversationRef.current) loadMessages(activeConversationRef.current.id);
         });
         conn.on('MessageReactionRemoved', () => {
-          if (activeConversation) loadMessages(activeConversation.id);
+          if (activeConversationRef.current) loadMessages(activeConversationRef.current.id);
         });
-        conn.on('MessageRead', () => {
-          if (activeConversation) loadMessages(activeConversation.id);
+        conn.on('MessageRead', (data: { conversationId: string; userId: string; readAt: string }) => {
+          if (activeConversationRef.current?.id === data.conversationId) {
+            setChatMessages((prev) =>
+              prev.map((m) => {
+                if (m.senderUserId !== data.userId && !m.readStates?.some((rs) => rs.userId === data.userId)) {
+                  return {
+                    ...m,
+                    deliveryStatus: 'read',
+                    readStates: [...(m.readStates || []), { userId: data.userId, userName: '', readAt: data.readAt }]
+                  };
+                }
+                return m;
+              })
+            );
+          }
+          chatService.getConversations().then(setConversations).catch(() => {});
+        });
+
+        // Real-Time Notifications
+        conn.on('NotificationCreated', (notif: NotificationItem) => {
+          setNotificationsList((prev) => [notif, ...prev.filter((n) => n.id !== notif.id)]);
+          addToast(notif.title, notif.body, 'info', 'notifications');
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          } else {
+            dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
+          }
+        });
+
+        // Real-Time Tasks
+        conn.on('TaskCreated', (taskItem?: any) => {
+          addToast(t('toastNewTask'), taskItem?.title || 'Task Created', 'task', 'tasks');
+          taskService.getTasks().then(setTasks).catch(() => {});
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          } else {
+            dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
+          }
+        });
+        conn.on('TaskUpdated', () => {
+          taskService.getTasks().then(setTasks).catch(() => {});
+        });
+        conn.on('TaskAssigned', (taskItem?: any) => {
+          addToast(t('toastNewTask'), taskItem?.title || 'New Task Assigned', 'task', 'tasks');
+          taskService.getTasks().then(setTasks).catch(() => {});
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          } else {
+            dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
+          }
+        });
+        conn.on('TaskStatusChanged', () => {
+          taskService.getTasks().then(setTasks).catch(() => {});
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          } else {
+            dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
+          }
+        });
+
+        // Real-Time Project Data Submissions & Approvals
+        conn.on('ProjectDataSubmitted', () => {
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => {});
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          }
+        });
+        conn.on('DataSubmitted', () => {
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => {});
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          }
+        });
+        conn.on('ProjectDataApproved', () => {
+          dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => {});
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => {});
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          } else {
+            dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
+          }
+        });
+        conn.on('DataApproved', () => {
+          dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => {});
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => {});
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          } else {
+            dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
+          }
+        });
+        conn.on('ProjectDataRejected', () => {
+          const u = authService.getCurrentUser();
+          if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
+            dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => {});
+            dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
+          }
         });
       }
     } catch {
@@ -212,7 +442,14 @@ export default function Home() {
         dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => {});
       }
       taskService.getTasks().then(setTasks).catch(() => {});
-      chatService.getConversations().then(setConversations).catch(() => {});
+      chatService.getConversations().then((convs) => {
+        setConversations(convs);
+        const conn = signalRService.getConnection();
+        if (conn) {
+          convs.forEach((c) => conn.invoke('JoinConversation', c.id).catch(() => {}));
+        }
+      }).catch(() => {});
+      notificationService.getNotifications().then((res) => setNotificationsList(res.items)).catch(() => {});
       dashboardService.getSafeConfig().then(setSafeConfig).catch(() => {});
     } finally {
       setIsLoadingContent(false);
@@ -238,20 +475,6 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const quickLogin = (loginEmail: string, loginPass: string) => {
-    setEmail(loginEmail);
-    setPassword(loginPass);
-    authService.login(loginEmail, loginPass).then((res) => {
-      if (res.success && res.data) {
-        setCurrentUser(res.data.user);
-        loadInitialData(res.data.user);
-        initSignalR();
-      } else {
-        setErrorMsg(res.message || 'Login failed');
-      }
-    });
   };
 
   const handleLogout = () => {
@@ -310,6 +533,12 @@ export default function Home() {
   // Chat Actions
   const openConversation = async (conv: Conversation) => {
     setActiveConversation(conv);
+    try {
+      const conn = signalRService.getConnection();
+      if (conn) {
+        conn.invoke('JoinConversation', conv.id).catch(() => {});
+      }
+    } catch {}
     await loadMessages(conv.id);
     await chatService.markAsRead(conv.id);
   };
@@ -325,14 +554,54 @@ export default function Home() {
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeConversation || !newMessageText.trim()) return;
+    if (!activeConversation || !newMessageText.trim() || !currentUser) return;
     const txt = newMessageText.trim();
     setNewMessageText('');
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: Message = {
+      id: tempId,
+      conversationId: activeConversation.id,
+      senderUserId: currentUser.id,
+      senderName: currentUser.fullName,
+      content: txt,
+      isEdited: false,
+      createdAt: new Date().toISOString(),
+      attachments: [],
+      reactions: [],
+      readStates: [],
+      deliveryStatus: 'sending'
+    };
+
+    setChatMessages((prev) => [...prev, optimisticMsg]);
+
     try {
       const sent = await chatService.sendMessage(activeConversation.id, txt);
-      setChatMessages((prev) => [...prev, sent]);
+      setChatMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...sent, deliveryStatus: 'sent' } : m))
+      );
+      chatService.getConversations().then(setConversations).catch(() => {});
     } catch (err: any) {
-      alert(err?.message || 'Failed to send message');
+      logger.error('Failed to send message', err);
+      setChatMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...m, deliveryStatus: 'failed' } : m))
+      );
+    }
+  };
+
+  const handleStartDirectChat = async (targetUser: any) => {
+    try {
+      const conv = await chatService.createDirectConversation(targetUser.id);
+      const updatedConvs = await chatService.getConversations();
+      setConversations(updatedConvs);
+      setShowNewChatModal(false);
+      setShowMessagesDropdown(false);
+      setActiveTab('chat');
+      const found = updatedConvs.find((c) => c.id === conv.id) || conv;
+      await openConversation(found);
+      logger.info('Direct conversation started', { targetUser: targetUser.email });
+    } catch (err: any) {
+      alert(err?.message || 'Failed to start conversation');
     }
   };
 
@@ -387,9 +656,9 @@ export default function Home() {
   const promptRequestChanges = (record: ProjectDataRecord) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Request Changes',
+      title: '{t('requestChanges')}',
       message: `Return "${record.title}" back to ${record.submitterName} with modification instructions.`,
-      confirmText: 'Request Changes',
+      confirmText: '{t('requestChanges')}',
       confirmColor: 'bg-amber-600 hover:bg-amber-500',
       onConfirm: async () => {
         if (!approvalComment.trim()) {
@@ -472,17 +741,21 @@ export default function Home() {
         lastName: newLastName,
         email: newUserEmail,
         password: newUserPassword,
-        role: newUserRole
+        role: newUserRole,
+        jobTitle: newUserJobTitle.trim() || undefined
       });
       setShowNewUserModal(false);
       setNewFirstName('');
       setNewLastName('');
       setNewUserEmail('');
       setNewUserPassword('');
+      setNewUserJobTitle('');
       const users = await dashboardService.getUsers();
       setUserList(users);
-      alert('User provisioned successfully.');
+      logger.info('User provisioned', { email: newUserEmail, jobTitle: newUserJobTitle });
+      alert(t('userCreatedSuccess'));
     } catch (err: any) {
+      logger.error('Failed to create user', err);
       alert(err?.message || 'Failed to create user');
     }
   };
@@ -502,10 +775,10 @@ export default function Home() {
     }
   };
 
-  // Export CSV Helper
+  // Export CSV Helper (Uses dynamic API_BASE_URL for cloud & local)
   const downloadCsv = (entityType: string) => {
     const token = localStorage.getItem('mti_access_token');
-    window.open(`http://localhost:5241/api/reports/export?entityType=${entityType}&access_token=${token}`, '_blank');
+    window.open(`${API_BASE_URL}/api/reports/export?entityType=${entityType}&access_token=${token}`, '_blank');
   };
 
   // -------------------------------------------------------------
@@ -513,93 +786,127 @@ export default function Home() {
   // -------------------------------------------------------------
   if (!currentUser) {
     return (
-      <div className="login-canvas min-h-screen flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 text-slate-100">
-        <div className="sm:mx-auto sm:w-full sm:max-w-md text-center animate-fade-up">
-          <div className="icon-badge mx-auto mb-5 h-16 w-16">
-            <Building2 className="w-8 h-8" strokeWidth={1.6} />
+      <div className="login-canvas min-h-screen flex items-center justify-center px-4 py-10 text-slate-800">
+        <div className="login-orb login-orb-a" aria-hidden />
+        <div className="login-orb login-orb-b" aria-hidden />
+        <div className="login-orb login-orb-c" aria-hidden />
+        <div className="login-grid-fade" aria-hidden />
+
+        <div className="relative z-10 w-full max-w-[460px] animate-fade-up">
+          {/* Language Switcher on Login Screen */}
+          <div className="flex justify-end mb-3">
+            <button
+              onClick={toggleLanguage}
+              type="button"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white hover:bg-slate-100 border border-sky-200 text-xs text-slate-700 transition-all backdrop-blur-md shadow-lg"
+            >
+              <span>{lang === 'ar' ? '🇺🇸' : '🇪🇬'}</span>
+              <span className="font-semibold">{lang === 'ar' ? 'English' : 'عربي'}</span>
+            </button>
           </div>
-          <p className="text-[11px] uppercase tracking-[0.22em] text-mti-300/80 mb-2 font-semibold">MTI Platform</p>
-          <h2 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-white">
-            Engineering Solutions
-          </h2>
-          <p className="mt-3 text-sm text-slate-400 leading-relaxed max-w-sm mx-auto">
-            Site monitoring, approvals, and field coordination — calm, clear, and always in sync.
-          </p>
-        </div>
 
-        <div className="mt-9 sm:mx-auto sm:w-full sm:max-w-md animate-fade-up-delay">
-          <div className="glass-panel-strong py-8 px-6 rounded-3xl sm:px-9">
-            {errorMsg && (
-              <div className="mb-5 p-3 rounded-2xl bg-rose-500/10 border border-rose-400/20 text-rose-300 text-xs flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
+          <div className="login-card">
+            <div className="login-card-shine" aria-hidden />
+            <div className="login-card-edge" aria-hidden />
 
-            <form className="space-y-4" onSubmit={handleLogin}>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Corporate Email or Username</label>
-                <input
-                  type="text"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@mti.com"
-                  required
-                  className="field-input block w-full px-3.5 py-2.5 rounded-xl text-sm"
+            {/* Brand hero — logo + iconic product name */}
+            <div className="relative px-7 pt-8 pb-2 text-center">
+              <div className="login-logo-shell mx-auto mb-6">
+                <img
+                  src="/images/CompanyLogo.png"
+                  alt="MTI Engineering Solutions"
+                  className="login-logo-img"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Password</label>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter your password"
-                  required
-                  className="field-input block w-full px-3.5 py-2.5 rounded-xl text-sm"
-                />
+              <div className="login-product-name">
+                <span className="login-product-mark" aria-hidden />
+                <h1>
+                  <span className="login-product-mti">MTI</span>
+                  <span className="login-product-mgmt">{t('productName')}</span>
+                </h1>
+                <span className="login-product-mark" aria-hidden />
               </div>
+              <p className="login-subtitle mt-3 px-3">
+                {t('loginSubtitle')}
+              </p>
+            </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 px-4 rounded-xl bg-mti-500 hover:bg-mti-400 text-white font-semibold text-sm transition-all shadow-glow flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Lock className="w-4 h-4" />}
-                Sign In to Platform
-              </button>
-            </form>
+            <div className="relative px-7 pb-8 pt-5">
+              {errorMsg && (
+                <div className="mb-4 p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 text-xs flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span className="leading-relaxed">{errorMsg}</span>
+                </div>
+              )}
 
-            <div className="mt-7 pt-6 border-t border-white/8">
-              <div className="text-[11px] text-slate-400 mb-3 font-medium flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-mti-400" />
-                Quick persona sign-in
-              </div>
-              <div className="grid grid-cols-2 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => quickLogin('admin', 'admin')}
-                  className="p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 text-left text-xs transition-all glass-panel-hover"
-                >
-                  <div className="font-semibold text-white flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-mti-400" />
-                    System Admin
+              <form className="space-y-4" onSubmit={handleLogin}>
+                <div className="login-field-block">
+                  <label className="login-label" htmlFor="login-email">
+                    {t('emailOrUsername')}
+                  </label>
+                  <div className="relative group">
+                    <span className="login-field-icon">
+                      <Mail className="w-4 h-4" strokeWidth={1.8} />
+                    </span>
+                    <input
+                      id="login-email"
+                      type="text"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder={t('emailPlaceholder')}
+                      required
+                      autoComplete="username"
+                      className="field-input login-field block w-full pl-11 rtl:pl-3.5 rtl:pr-11 pr-3.5 py-3.5 rounded-2xl text-sm"
+                    />
                   </div>
-                  <div className="text-[10px] text-mti-300/90 font-mono mt-1">admin / admin</div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => quickLogin('engineer@mti.com', 'Engineer@MTI2026!')}
-                  className="p-3 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 text-left text-xs transition-all glass-panel-hover"
-                >
-                  <div className="font-semibold text-white flex items-center gap-1.5">
-                    <HardHat className="w-3.5 h-3.5 text-amber-300" />
-                    Field Engineer
+                </div>
+
+                <div className="login-field-block">
+                  <label className="login-label" htmlFor="login-password">
+                    {t('password')}
+                  </label>
+                  <div className="relative group">
+                    <span className="login-field-icon">
+                      <Lock className="w-4 h-4" strokeWidth={1.8} />
+                    </span>
+                    <input
+                      id="login-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={t('passwordPlaceholder')}
+                      required
+                      autoComplete="current-password"
+                      className="field-input login-field block w-full pl-11 rtl:pl-11 rtl:pr-11 pr-11 py-3.5 rounded-2xl text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      className="absolute right-3 rtl:right-auto rtl:left-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg text-slate-500 hover:text-sky-600 transition-colors"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-1">engineer@mti.com</div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="login-submit group w-full mt-2 py-3.5 px-4 rounded-2xl text-white font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {loading ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Fingerprint className="w-4 h-4" strokeWidth={1.9} />
+                  )}
+                  <span>{loading ? t('signingIn') : t('signIn')}</span>
+                  {!loading && (
+                    <ArrowRight className={`w-4 h-4 opacity-85 group-hover:translate-x-0.5 transition-transform ${lang === 'ar' ? 'rotate-180' : ''}`} />
+                  )}
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         </div>
@@ -617,61 +924,66 @@ export default function Home() {
   }
 
   // Sidebar Menu Items based on Persona (Prompt 20)
+  // Sidebar Menu Items based on Persona with bilingual support
   const adminMenuItems: MenuItem[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'projects', label: 'Projects', icon: FolderKanban },
-    { id: 'sites', label: 'Sites', icon: MapPin },
-    { id: 'engineers', label: 'Users', icon: Users },
-    { id: 'project-data', label: 'Project Data', icon: FileSpreadsheet },
-    { id: 'approvals', label: 'Approvals', icon: FileCheck, badge: pendingRecords.length },
-    { id: 'tasks', label: 'Tasks', icon: CheckSquare },
-    { id: 'chat', label: 'Chat', icon: MessageSquare },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
-    { id: 'reports', label: 'Reports', icon: BarChart3 },
-    { id: 'audit', label: 'Audit Logs', icon: History },
-    { id: 'settings', label: 'Settings', icon: Settings }
+    { id: 'dashboard', label: t('navDashboard'), icon: LayoutDashboard },
+    { id: 'projects', label: t('navProjects'), icon: FolderKanban },
+    { id: 'sites', label: t('navSites'), icon: MapPin },
+    { id: 'engineers', label: t('navEngineers'), icon: Users },
+    { id: 'project-data', label: t('navProjectData'), icon: FileSpreadsheet },
+    { id: 'approvals', label: t('navApprovals'), icon: FileCheck, badge: pendingRecords.length },
+    { id: 'tasks', label: t('navTasks'), icon: CheckSquare },
+    { id: 'chat', label: t('navChat'), icon: MessageSquare },
+    { id: 'notifications', label: t('navNotifications'), icon: Bell },
+    { id: 'reports', label: t('navReports'), icon: BarChart3 },
+    { id: 'audit', label: t('navAudit'), icon: History },
+    { id: 'settings', label: t('navSettings'), icon: Settings }
   ];
 
   const engineerMenuItems: MenuItem[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'my-projects', label: 'My Projects', icon: FolderKanban },
-    { id: 'my-sites', label: 'My Sites', icon: MapPin },
-    { id: 'my-data', label: 'My Data', icon: FileSpreadsheet },
-    { id: 'my-tasks', label: 'My Tasks', icon: CheckSquare },
-    { id: 'chat', label: 'Chat', icon: MessageSquare },
-    { id: 'notifications', label: 'Notifications', icon: Bell },
-    { id: 'profile', label: 'Profile', icon: UserCircle }
+    { id: 'dashboard', label: t('navDashboard'), icon: LayoutDashboard },
+    { id: 'my-projects', label: t('navMyProjects'), icon: FolderKanban },
+    { id: 'my-sites', label: t('navMySites'), icon: MapPin },
+    { id: 'my-data', label: t('navMyData'), icon: FileSpreadsheet },
+    { id: 'my-tasks', label: t('navMyTasks'), icon: CheckSquare },
+    { id: 'chat', label: t('navChat'), icon: MessageSquare },
+    { id: 'notifications', label: t('navNotifications'), icon: Bell },
+    { id: 'profile', label: t('navProfile'), icon: UserCircle }
   ];
 
   const menuItems: MenuItem[] = isAdmin ? adminMenuItems : engineerMenuItems;
 
   // -------------------------------------------------------------
-  // Authenticated Desktop-First Enterprise Layout (Prompt 20)
+  // Authenticated Desktop & Mobile Responsive Enterprise Layout
   // -------------------------------------------------------------
   return (
-    <div className="app-shell min-h-screen text-slate-100 flex font-body overflow-hidden">
-      {/* 1. DESKTOP SIDEBAR */}
+    <div className="app-shell min-h-screen text-slate-800 flex font-body overflow-hidden">
+      {/* 1. DESKTOP SIDEBAR (Visible on lg and larger) */}
       <aside
-        className={`${
+        className={`hidden lg:flex ${
           sidebarCollapsed ? 'w-[4.75rem]' : 'w-64'
-        } glass-nav flex flex-col transition-all duration-300 ease-in-out z-30`}
+        } glass-nav flex-col transition-all duration-300 ease-in-out z-30`}
       >
         {/* Sidebar Header / Logo */}
-        <div className="p-4 border-b border-white/8 flex items-center justify-between">
+        <div className="p-4 border-b border-sky-100 flex items-center justify-between">
           <div className="flex items-center gap-3 overflow-hidden">
-            <div className="icon-badge h-10 w-10 flex-shrink-0">
-              <Building2 className="w-5 h-5" strokeWidth={1.7} />
+            <div className="p-1 rounded-xl bg-[#0b0b0b] border border-sky-200 flex-shrink-0 flex items-center justify-center">
+              <img
+                src="/images/CompanyLogo.png"
+                alt="MTI Logo"
+                className="h-7 w-auto object-contain"
+              />
             </div>
             {!sidebarCollapsed && (
               <div>
-                <div className="font-display font-bold text-white text-sm leading-tight truncate">MTI Solutions</div>
-                <div className="text-[10px] text-slate-400 tracking-wide">Enterprise Platform</div>
+                <div className="font-display font-bold text-slate-800 text-sm leading-tight truncate">{t('appName')}</div>
+                <div className="text-[10px] text-mti-600 tracking-wide font-medium">{t('appSubtitle')}</div>
               </div>
             )}
           </div>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-1.5 rounded-lg hover:bg-white/5 text-slate-400 hover:text-white transition-colors"
+            className="p-1.5 rounded-lg hover:bg-sky-50 text-slate-400 hover:text-slate-800 transition-colors"
           >
             <ChevronLeft className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} />
           </button>
@@ -687,12 +999,13 @@ export default function Home() {
                 key={item.id}
                 onClick={() => {
                   setActiveTab(item.id);
+                  logger.info('Tab switched', { tab: item.id });
                   if (item.id === 'my-projects' || item.id === 'projects') loadProjects();
                 }}
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
                   isCurrent
                     ? 'nav-item-active'
-                    : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-sky-50'
                 }`}
                 title={sidebarCollapsed ? item.label : undefined}
               >
@@ -711,25 +1024,27 @@ export default function Home() {
         </div>
 
         {/* Sidebar Footer User Info */}
-        <div className="p-3 border-t border-white/8 bg-white/[0.02]">
+        <div className="p-3 border-t border-sky-100 bg-sky-50/80">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5 overflow-hidden">
-              <div className="w-8 h-8 rounded-full bg-mti-500/20 border border-mti-400/30 flex items-center justify-center font-bold text-xs text-mti-200 flex-shrink-0">
+              <div className="w-8 h-8 rounded-full bg-mti-100 border border-mti-200 flex items-center justify-center font-bold text-xs text-mti-700 flex-shrink-0">
                 {currentUser.firstName[0]}
                 {currentUser.lastName[0]}
               </div>
               {!sidebarCollapsed && (
-                <div className="truncate text-left">
-                  <div className="text-xs font-semibold text-white truncate">{currentUser.fullName}</div>
-                  <div className="text-[10px] text-mti-300 truncate">{currentUser.roles.join(', ')}</div>
+                <div className="truncate text-start">
+                  <div className="text-xs font-semibold text-slate-800 truncate">{currentUser.fullName}</div>
+                  <div className="text-[10px] text-mti-600 truncate">
+                    {currentUser.jobTitle || currentUser.roles.join(', ')}
+                  </div>
                 </div>
               )}
             </div>
             {!sidebarCollapsed && (
               <button
                 onClick={handleLogout}
-                title="Sign Out"
-                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-white/5 transition-colors"
+                title={t('signOut')}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-sky-50 transition-colors"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -738,48 +1053,362 @@ export default function Home() {
         </div>
       </aside>
 
+      {/* MOBILE & TABLET DRAWER */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div
+            className="fixed inset-0 bg-slate-900/30 backdrop-blur-sm transition-opacity"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <aside className="fixed inset-y-0 start-0 max-w-xs w-full glass-nav flex flex-col z-50 p-4 shadow-xl">
+            <div className="flex items-center justify-between pb-4 border-b border-sky-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1 rounded-lg bg-[#0b0b0b] flex items-center justify-center">
+                  <img
+                    src="/images/CompanyLogo.png"
+                    alt="MTI Logo"
+                    className="h-7 w-auto object-contain"
+                  />
+                </div>
+                <div>
+                  <div className="font-display font-bold text-slate-800 text-sm">{t('appName')}</div>
+                  <div className="text-[10px] text-mti-600 font-medium">{t('appSubtitle')}</div>
+                </div>
+              </div>
+              <button
+                onClick={() => setMobileMenuOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-4 space-y-1">
+              {menuItems.map((item) => {
+                const Icon = item.icon;
+                const isCurrent = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      setActiveTab(item.id);
+                      setMobileMenuOpen(false);
+                      logger.info('Mobile tab switched', { tab: item.id });
+                      if (item.id === 'my-projects' || item.id === 'projects') loadProjects();
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-xs font-medium transition-all ${
+                      isCurrent
+                        ? 'nav-item-active'
+                        : 'text-slate-500 hover:text-slate-800 hover:bg-sky-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon className="w-4 h-4 flex-shrink-0" strokeWidth={1.8} />
+                      <span>{item.label}</span>
+                    </div>
+                    {item.badge && item.badge > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px]">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pt-4 border-t border-sky-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5 overflow-hidden">
+                <div className="w-8 h-8 rounded-full bg-mti-100 border border-mti-200 flex items-center justify-center font-bold text-xs text-mti-700">
+                  {currentUser.firstName[0]}
+                  {currentUser.lastName[0]}
+                </div>
+                <div className="truncate text-start">
+                  <div className="text-xs font-semibold text-slate-800 truncate">{currentUser.fullName}</div>
+                  <div className="text-[10px] text-mti-600 truncate">
+                    {currentUser.jobTitle || currentUser.roles.join(', ')}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="p-2 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-sky-50"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </aside>
+        </div>
+      )}
+
       {/* 2. MAIN CONTENT AREA */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Topbar */}
-        <header className="h-16 glass-topbar px-6 flex items-center justify-between z-20">
-          <form onSubmit={handleGlobalSearch} className="relative max-w-md w-full">
-            <Search className="w-4 h-4 absolute left-3.5 top-2.5 text-slate-500" />
-            <input
-              type="text"
-              value={globalSearchQuery}
-              onChange={(e) => setGlobalSearchQuery(e.target.value)}
-              placeholder="Search projects, sites, tasks, reports..."
-              className="field-input w-full pl-10 pr-4 py-2 rounded-xl text-xs"
-            />
-          </form>
+        <header className="h-16 glass-topbar px-4 sm:px-6 flex items-center justify-between z-20">
+          <div className="flex items-center gap-3 sm:gap-4 flex-1 max-w-2xl">
+            {/* Mobile Hamburger Menu Toggle */}
+            <button
+              onClick={() => setMobileMenuOpen(true)}
+              className="lg:hidden p-2 rounded-xl bg-sky-50 hover:bg-white/[0.08] border border-sky-100 text-slate-600"
+              aria-label="Toggle navigation menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-white/[0.03] border border-white/10 text-[11px]">
-              <Radio className={`w-3 h-3 ${signalRConnected ? 'text-emerald-400 status-dot-live' : 'text-amber-300'}`} />
-              <span className={signalRConnected ? 'text-emerald-300 font-medium' : 'text-amber-200'}>
-                {signalRConnected ? 'Live Sync' : 'Connecting'}
+            {/* Permanent Top Company Logo & Identity Badge */}
+            <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-2xl bg-white border border-sky-100 shadow-sm backdrop-blur-md flex-shrink-0">
+              <div className="p-1 rounded-lg bg-[#0b0b0b] flex items-center justify-center">
+                <img
+                  src="/images/CompanyLogo.png"
+                  alt="MTI Engineering Solutions"
+                  className="h-8 w-auto object-contain"
+                />
+              </div>
+              <div className="hidden sm:block border-l border-sky-100 pl-2.5 rtl:border-l-0 rtl:border-r rtl:pl-0 rtl:pr-2.5">
+                <div className="text-[11px] font-bold text-slate-800 tracking-wide leading-none">{t('appName')}</div>
+                <div className="text-[9px] text-mti-600 font-medium uppercase tracking-wider mt-0.5">{t('portalBadge')}</div>
+              </div>
+            </div>
+
+            <form onSubmit={handleGlobalSearch} className="relative max-w-md w-full hidden md:block">
+              <Search className="w-4 h-4 absolute left-3.5 rtl:left-auto rtl:right-3.5 top-2.5 text-slate-500" />
+              <input
+                type="text"
+                value={globalSearchQuery}
+                onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                placeholder={t('searchPlaceholder')}
+                className="field-input w-full pl-10 rtl:pl-4 rtl:pr-10 pr-4 py-2 rounded-xl text-xs"
+              />
+            </form>
+          </div>
+
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Bilingual Language Switcher Toggle Button */}
+            <button
+              onClick={toggleLanguage}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-white/[0.08] border border-sky-100 text-xs font-semibold text-slate-700 transition-colors shadow-sm"
+              title={lang === 'ar' ? 'Switch to English' : 'التحويل للغة العربية'}
+            >
+              <span className="text-sm">{lang === 'ar' ? '🇺🇸' : '🇪🇬'}</span>
+              <span className="hidden sm:inline">{lang === 'ar' ? 'English' : 'عربي'}</span>
+            </button>
+
+            {/* SignalR Connection Status Pill */}
+            <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-white border border-sky-100 text-[11px]">
+              <Radio className={`w-3 h-3 ${signalRConnected ? 'text-emerald-600 status-dot-live' : 'text-amber-600'}`} />
+              <span className={`hidden sm:inline ${signalRConnected ? 'text-emerald-600 font-medium' : 'text-amber-600'}`}>
+                {signalRConnected ? t('liveSync') : t('connecting')}
               </span>
             </div>
 
-            <button
-              onClick={() => setActiveTab('notifications')}
-              className="p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 text-slate-300 relative transition-colors"
-            >
-              <Bell className="w-4 h-4" strokeWidth={1.8} />
-            </button>
+            {/* Facebook Messenger Style Messages Button & Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowMessagesDropdown((v) => !v);
+                  setShowNotificationsDropdown(false);
+                }}
+                className="p-2.5 rounded-xl bg-white hover:bg-sky-50 border border-sky-100 text-slate-600 relative transition-colors"
+                title={t('messagesTitle')}
+              >
+                <MessageSquare className="w-4 h-4" strokeWidth={1.8} />
+                {totalUnreadMessages > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-sky-500 text-slate-800 rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-sky-500/50">
+                    {totalUnreadMessages}
+                  </span>
+                )}
+              </button>
+
+              {/* Facebook Messenger Dropdown Popover */}
+              {showMessagesDropdown && (
+                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-2xl bg-sky-50 border border-sky-100 shadow-xl backdrop-blur-xl z-50 overflow-hidden animate-fade-up">
+                  <div className="p-3.5 border-b border-sky-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="w-4 h-4 text-sky-600" />
+                      <span className="font-bold text-slate-800 text-xs">{t('messagesTitle')}</span>
+                      {totalUnreadMessages > 0 && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-600 border border-sky-500/30 font-semibold">
+                          {totalUnreadMessages} {t('messagesUnread')}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        setShowNewChatModal(true);
+                        setShowMessagesDropdown(false);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-slate-800 text-[11px] font-semibold transition-colors flex items-center gap-1 shadow-sm"
+                    >
+                      <Plus className="w-3 h-3" />
+                      {t('startChat')}
+                    </button>
+                  </div>
+
+                  <div className="max-h-80 overflow-y-auto divide-y divide-sky-100/50">
+                    {conversations.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-slate-500">
+                        <MessageSquare className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+                        {t('noConversationsFound')}
+                      </div>
+                    ) : (
+                      conversations.slice(0, 6).map((c) => {
+                        const otherMember = c.members.find((m) => m.userId !== currentUser.id);
+                        return (
+                          <div
+                            key={c.id}
+                            onClick={() => {
+                              openConversation(c);
+                              setActiveTab('chat');
+                              setShowMessagesDropdown(false);
+                            }}
+                            className={`p-3.5 hover:bg-sky-50 transition-colors cursor-pointer flex items-center gap-3 ${
+                              c.unreadCount > 0 ? 'bg-sky-500/[0.05]' : ''
+                            }`}
+                          >
+                            <div className="w-9 h-9 rounded-full bg-sky-500/20 border border-sky-400/30 flex items-center justify-center font-bold text-xs text-sky-600 flex-shrink-0">
+                              {(otherMember?.userName || 'C')[0]}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className={`font-semibold text-xs truncate ${c.unreadCount > 0 ? 'text-slate-800' : 'text-slate-700'}`}>
+                                  {c.title || otherMember?.userName || 'Direct Chat'}
+                                </span>
+                                {c.unreadCount > 0 && (
+                                  <span className="min-w-[16px] h-4 px-1 rounded-full bg-sky-500 text-slate-800 text-[9px] font-bold flex items-center justify-center flex-shrink-0">
+                                    {c.unreadCount}
+                                  </span>
+                                )}
+                              </div>
+                              <p className={`text-[11px] truncate mt-0.5 ${c.unreadCount > 0 ? 'text-sky-200 font-medium' : 'text-slate-400'}`}>
+                                {c.lastMessage?.content || 'No messages yet'}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="p-2.5 border-t border-sky-100 bg-sky-50/80 text-center">
+                    <button
+                      onClick={() => {
+                        setActiveTab('chat');
+                        setShowMessagesDropdown(false);
+                      }}
+                      className="w-full py-2 rounded-xl bg-white hover:bg-slate-100 border border-sky-100 text-sky-600 text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <span>{t('viewAllMessages')}</span>
+                      <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Notification Bell & Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowNotificationsDropdown((v) => !v);
+                  setShowMessagesDropdown(false);
+                }}
+                className="p-2.5 rounded-xl bg-white hover:bg-sky-50 border border-sky-100 text-slate-600 relative transition-colors"
+                title={t('navNotifications')}
+              >
+                <Bell className="w-4 h-4" strokeWidth={1.8} />
+                {notificationsList.filter((n) => !n.isRead).length > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-rose-500 text-slate-800 rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse shadow-md shadow-rose-500/50">
+                    {notificationsList.filter((n) => !n.isRead).length}
+                  </span>
+                )}
+              </button>
+
+              {showNotificationsDropdown && (
+                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-2xl bg-sky-50 border border-sky-100 shadow-xl backdrop-blur-xl z-50 overflow-hidden animate-fade-up">
+                  <div className="p-3.5 border-b border-sky-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Bell className="w-4 h-4 text-mti-600" />
+                      <span className="font-bold text-slate-800 text-xs">{t('realTimeNotifications')}</span>
+                    </div>
+                    {notificationsList.some((n) => !n.isRead) && (
+                      <button
+                        onClick={async () => {
+                          await notificationService.markAllAsRead();
+                          setNotificationsList((prev) => prev.map((n) => ({ ...n, isRead: true })));
+                        }}
+                        className="text-[11px] text-mti-600 hover:underline"
+                      >
+                        {t('markAllAsRead')}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto divide-y divide-sky-100/50">
+                    {notificationsList.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-slate-500">
+                        {t('noNotifications')}
+                      </div>
+                    ) : (
+                      notificationsList.slice(0, 5).map((n) => (
+                        <div
+                          key={n.id}
+                          onClick={async () => {
+                            if (!n.isRead) {
+                              await notificationService.markAsRead(n.id);
+                              setNotificationsList((prev) =>
+                                prev.map((item) => (item.id === n.id ? { ...item, isRead: true } : item))
+                              );
+                            }
+                            if (n.type === 'NewTask') setActiveTab('tasks');
+                            if (n.type === 'DataApproval') setActiveTab('approvals');
+                            if (n.type === 'NewMessage') setActiveTab('chat');
+                            setShowNotificationsDropdown(false);
+                          }}
+                          className={`p-3.5 hover:bg-sky-50 transition-colors cursor-pointer flex items-start gap-3 ${
+                            !n.isRead ? 'bg-mti-500/[0.06]' : ''
+                          }`}
+                        >
+                          <div className="p-1.5 rounded-lg bg-slate-100 text-mti-600 flex-shrink-0 mt-0.5">
+                            <Radio className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-semibold text-slate-800 truncate">{n.title}</div>
+                            <p className="text-[11px] text-slate-400 line-clamp-2 mt-0.5">{n.body}</p>
+                            <span className="text-[9px] text-slate-500 mt-1 block">
+                              {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="p-2.5 border-t border-sky-100 bg-sky-50/80 text-center">
+                    <button
+                      onClick={() => {
+                        setActiveTab('notifications');
+                        setShowNotificationsDropdown(false);
+                      }}
+                      className="w-full py-2 rounded-xl bg-white hover:bg-slate-100 border border-sky-100 text-slate-600 text-xs font-semibold transition-colors"
+                    >
+                      {t('navNotifications')}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
         {/* Global Search Results Modal */}
         {searchResults !== null && (
-          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-start justify-center p-6 pt-20">
-            <div className="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4 max-h-[80vh] overflow-y-auto">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                  <Search className="w-4 h-4 text-mti-400" />
+          <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-start justify-center p-6 pt-20">
+            <div className="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-sky-100 shadow-xl space-y-4 max-h-[80vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-sky-100 pb-3">
+                <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                  <Search className="w-4 h-4 text-mti-600" />
                   Search Results for &ldquo;{globalSearchQuery}&rdquo; ({searchResults.length})
                 </h3>
-                <button onClick={() => setSearchResults(null)} className="text-slate-400 hover:text-white">
+                <button onClick={() => setSearchResults(null)} className="text-slate-400 hover:text-slate-800">
                   <X className="w-4 h-4" />
                 </button>
               </div>
@@ -794,17 +1423,17 @@ export default function Home() {
                         setSearchResults(null);
                         setDrawerData({ title: item.title, type: item.type, details: item });
                       }}
-                      className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 hover:border-mti-500/40 cursor-pointer text-xs flex items-center justify-between"
+                      className="p-3 rounded-xl bg-white border border-sky-100 hover:border-mti-200 cursor-pointer text-xs flex items-center justify-between"
                     >
                       <div>
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-mti-400 mr-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600 mr-2">
                           {item.type}
                         </span>
-                        <span className="font-semibold text-white">{item.title}</span>
+                        <span className="font-semibold text-slate-800">{item.title}</span>
                         {item.subtitle && <p className="text-slate-400 text-[11px] mt-0.5">{item.subtitle}</p>}
                       </div>
                       {item.status && (
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">
                           {item.status}
                         </span>
                       )}
@@ -821,14 +1450,14 @@ export default function Home() {
           {/* Skeleton Loader while content switching */}
           {isLoadingContent ? (
             <div className="space-y-4 animate-pulse">
-              <div className="h-8 bg-slate-800/60 rounded-xl w-1/4"></div>
+              <div className="h-8 bg-slate-100 rounded-xl w-1/4"></div>
               <div className="grid grid-cols-4 gap-4">
-                <div className="h-24 bg-slate-800/60 rounded-2xl"></div>
-                <div className="h-24 bg-slate-800/60 rounded-2xl"></div>
-                <div className="h-24 bg-slate-800/60 rounded-2xl"></div>
-                <div className="h-24 bg-slate-800/60 rounded-2xl"></div>
+                <div className="h-24 bg-slate-100 rounded-2xl"></div>
+                <div className="h-24 bg-slate-100 rounded-2xl"></div>
+                <div className="h-24 bg-slate-100 rounded-2xl"></div>
+                <div className="h-24 bg-slate-100 rounded-2xl"></div>
               </div>
-              <div className="h-64 bg-slate-800/60 rounded-2xl"></div>
+              <div className="h-64 bg-slate-100 rounded-2xl"></div>
             </div>
           ) : (
             <>
@@ -837,118 +1466,118 @@ export default function Home() {
               {/* ======================================================== */}
               {activeTab === 'dashboard' && (
                 <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h2 className="font-display text-xl font-bold text-white">
-                        {isAdmin ? 'Executive Administration Dashboard' : 'Field Engineer Operational Space'}
-                      </h2>
-                      <p className="text-xs text-slate-400 mt-1">
-                        {isAdmin
-                          ? 'Central monitoring, approvals, tasks, and audit activity'
-                          : 'Assigned construction sites, pending milestones, and submitted records'}
-                      </p>
-                    </div>
-
-                    {isAdmin && (
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => downloadCsv('ProjectData')}
-                          className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 flex items-center gap-1.5"
-                        >
-                          <Download className="w-3.5 h-3.5 text-mti-400" />
-                          Export Data CSV
-                        </button>
-                        <button
-                          onClick={() => downloadCsv('Tasks')}
-                          className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 flex items-center gap-1.5"
-                        >
-                          <Download className="w-3.5 h-3.5 text-mti-400" />
-                          Export Tasks CSV
-                        </button>
+                  <div className="glow-card p-5 rounded-2xl">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h2 className="font-display text-xl font-bold text-slate-800">
+                          {isAdmin ? t('adminDashboardTitle') : t('engineerDashboardTitle')}
+                        </h2>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {isAdmin ? t('adminDashboardSubtitle') : t('engineerDashboardSubtitle')}
+                        </p>
                       </div>
-                    )}
+
+                      {isAdmin && (
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            onClick={() => downloadCsv('ProjectData')}
+                            className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-mti-200 text-xs text-slate-600 flex items-center gap-1.5"
+                          >
+                            <Download className="w-3.5 h-3.5 text-mti-600" />
+                            {t('exportDataCsv')}
+                          </button>
+                          <button
+                            onClick={() => downloadCsv('Tasks')}
+                            className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 border border-mti-200 text-xs text-slate-600 flex items-center gap-1.5"
+                          >
+                            <Download className="w-3.5 h-3.5 text-mti-600" />
+                            {t('exportTasksCsv')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Cards / KPI Metrics */}
                   {isAdmin && adminStats && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="glass-panel glass-panel-hover p-4 rounded-2xl">
+                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-slate-400 text-xs">Total Projects</div>
-                          <div className="kpi-icon text-mti-300"><Briefcase className="w-4 h-4" /></div>
+                          <div className="text-slate-400 text-xs">{t('totalProjects')}</div>
+                          <div className="kpi-icon text-mti-600"><Briefcase className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-white">{adminStats.totalProjects}</div>
-                        <div className="text-[11px] text-emerald-400 mt-1">{adminStats.activeProjects} Active</div>
+                        <div className="font-display text-2xl font-bold text-slate-800">{adminStats.totalProjects}</div>
+                        <div className="text-[11px] text-emerald-600 mt-1">{adminStats.activeProjects} {t('activeProjects')}</div>
                       </div>
-                      <div className="glass-panel glass-panel-hover p-4 rounded-2xl">
+                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-slate-400 text-xs">Monitored Sites</div>
-                          <div className="kpi-icon text-teal-300"><MapPin className="w-4 h-4" /></div>
+                          <div className="text-slate-400 text-xs">{t('monitoredSites')}</div>
+                          <div className="kpi-icon text-teal-600"><MapPin className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-white">{adminStats.totalSites}</div>
-                        <div className="text-[11px] text-mti-300 mt-1">{adminStats.totalEngineers} Active Engineers</div>
+                        <div className="font-display text-2xl font-bold text-slate-800">{adminStats.totalSites}</div>
+                        <div className="text-[11px] text-mti-600 mt-1">{adminStats.totalEngineers} {t('activeEngineers')}</div>
                       </div>
-                      <div className="glass-panel glass-panel-hover p-4 rounded-2xl">
+                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-slate-400 text-xs">Pending Approvals</div>
-                          <div className="kpi-icon text-amber-300"><FileCheck className="w-4 h-4" /></div>
+                          <div className="text-slate-400 text-xs">{t('pendingApprovals')}</div>
+                          <div className="kpi-icon text-amber-600"><FileCheck className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-amber-300">{adminStats.pendingApprovals}</div>
-                        <div className="text-[11px] text-slate-400 mt-1">{adminStats.approvedData} Approved Records</div>
+                        <div className="font-display text-2xl font-bold text-amber-600">{adminStats.pendingApprovals}</div>
+                        <div className="text-[11px] text-slate-400 mt-1">{adminStats.approvedData} {t('approvedRecords')}</div>
                       </div>
-                      <div className="glass-panel glass-panel-hover p-4 rounded-2xl">
+                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-slate-400 text-xs">Open Tasks</div>
-                          <div className="kpi-icon text-sky-300"><Activity className="w-4 h-4" /></div>
+                          <div className="text-slate-400 text-xs">{t('openTasks')}</div>
+                          <div className="kpi-icon text-sky-600"><Activity className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-white">{adminStats.openTasks}</div>
-                        <div className="text-[11px] text-rose-300 mt-1">{adminStats.overdueTasks} Overdue</div>
+                        <div className="font-display text-2xl font-bold text-slate-800">{adminStats.openTasks}</div>
+                        <div className="text-[11px] text-rose-600 mt-1">{adminStats.overdueTasks} {t('overdueLabel')}</div>
                       </div>
                     </div>
                   )}
 
                   {!isAdmin && engineerStats && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="glass-panel glass-panel-hover p-4 rounded-2xl">
+                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-slate-400 text-xs">My Assigned Projects</div>
-                          <div className="kpi-icon text-mti-300"><FolderKanban className="w-4 h-4" /></div>
+                          <div className="text-slate-400 text-xs">{t('myAssignedProjects')}</div>
+                          <div className="kpi-icon text-mti-600"><FolderKanban className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-white">{engineerStats.myProjectsCount}</div>
-                        <div className="text-[11px] text-mti-300 mt-1">{engineerStats.mySitesCount} Sites</div>
+                        <div className="font-display text-2xl font-bold text-slate-800">{engineerStats.myProjectsCount}</div>
+                        <div className="text-[11px] text-mti-600 mt-1">{engineerStats.mySitesCount} {t('sitesCount')}</div>
                       </div>
-                      <div className="glass-panel glass-panel-hover p-4 rounded-2xl">
+                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-slate-400 text-xs">My Pending Tasks</div>
-                          <div className="kpi-icon text-sky-300"><CheckSquare className="w-4 h-4" /></div>
+                          <div className="text-slate-400 text-xs">{t('myPendingTasks')}</div>
+                          <div className="kpi-icon text-sky-600"><CheckSquare className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-white">{engineerStats.pendingTasksCount}</div>
-                        <div className="text-[11px] text-emerald-400 mt-1">{engineerStats.completedTasksCount} Completed</div>
+                        <div className="font-display text-2xl font-bold text-slate-800">{engineerStats.pendingTasksCount}</div>
+                        <div className="text-[11px] text-emerald-600 mt-1">{engineerStats.completedTasksCount} {t('completedLabel')}</div>
                       </div>
-                      <div className="glass-panel glass-panel-hover p-4 rounded-2xl">
+                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-slate-400 text-xs">Overdue Tasks</div>
-                          <div className="kpi-icon text-rose-300"><AlertCircle className="w-4 h-4" /></div>
+                          <div className="text-slate-400 text-xs">{t('overdueTasks')}</div>
+                          <div className="kpi-icon text-rose-600"><AlertCircle className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-rose-300">{engineerStats.overdueTasksCount}</div>
-                        <div className="text-[11px] text-slate-400 mt-1">Requires immediate completion</div>
+                        <div className="font-display text-2xl font-bold text-rose-600">{engineerStats.overdueTasksCount}</div>
+                        <div className="text-[11px] text-slate-400 mt-1">{t('needsAttention')}</div>
                       </div>
-                      <div className="glass-panel glass-panel-hover p-4 rounded-2xl">
+                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="text-slate-400 text-xs">Approved Records</div>
-                          <div className="kpi-icon text-emerald-300"><FileCheck className="w-4 h-4" /></div>
+                          <div className="text-slate-400 text-xs">{t('approvedRecords')}</div>
+                          <div className="kpi-icon text-emerald-600"><FileCheck className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-emerald-300">{engineerStats.approvedDataCount}</div>
-                        <div className="text-[11px] text-amber-300 mt-1">{engineerStats.pendingDataCount} Under Review</div>
+                        <div className="font-display text-2xl font-bold text-emerald-600">{engineerStats.approvedDataCount}</div>
+                        <div className="text-[11px] text-amber-600 mt-1">{engineerStats.pendingDataCount} {t('underReview')}</div>
                       </div>
                     </div>
                   )}
 
                   {/* Operational Project Monitoring */}
-                  <div className="glass-panel p-5 rounded-2xl space-y-4">
-                    <h3 className="font-display font-bold text-white text-sm flex items-center gap-2">
-                      <FolderKanban className="w-4 h-4 text-mti-400" />
-                      Active Monitored Projects
+                  <div className="glow-card p-5 rounded-2xl space-y-4">
+                    <h3 className="font-display font-bold text-slate-800 text-sm flex items-center gap-2">
+                      <FolderKanban className="w-4 h-4 text-mti-600" />
+                      {t('activeMonitoredProjects')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {projects.map((p) => (
@@ -958,22 +1587,22 @@ export default function Home() {
                             selectProject(p.id);
                             setDrawerData({ title: p.name, type: 'Project', details: p });
                           }}
-                          className="p-4 rounded-xl bg-white/[0.03] border border-white/10 hover:border-mti-400/40 cursor-pointer transition-all space-y-2 glass-panel-hover"
+                          className="glow-card glow-card-hover p-4 rounded-xl cursor-pointer space-y-2"
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-mti-500/15 text-mti-300">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-mti-50 text-mti-600">
                               {p.code}
                             </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded-lg bg-white/5 text-emerald-300">
-                              {p.status}
+                            <span className="text-[10px] px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-600">
+                              {p.status === 'Active' ? t('activeLabel') : p.status}
                             </span>
                           </div>
-                          <div className="font-semibold text-white text-sm">{p.name}</div>
+                          <div className="font-semibold text-slate-800 text-sm">{p.name}</div>
                           <div className="text-xs text-slate-400">{p.clientName}</div>
-                          <div className="text-[11px] text-slate-500 pt-2 border-t border-white/8 flex items-center justify-between">
-                            <span>{p.totalSitesCount} Sites Monitored</span>
-                            <span className="text-mti-300 flex items-center gap-0.5 font-medium">
-                              Inspect <ChevronRight className="w-3 h-3" />
+                          <div className="text-[11px] text-slate-500 pt-2 border-t border-sky-100 flex items-center justify-between gap-2">
+                            <span>{p.totalSitesCount} {t('sitesMonitored')}</span>
+                            <span className="text-mti-600 flex items-center gap-0.5 font-medium">
+                              {t('inspect')} <ChevronRight className={`w-3 h-3 ${lang === 'ar' ? 'rotate-180' : ''}`} />
                             </span>
                           </div>
                         </div>
@@ -988,16 +1617,16 @@ export default function Home() {
               {/* ======================================================== */}
               {(activeTab === 'projects' || activeTab === 'my-projects') && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <div className="lg:col-span-1 space-y-4">
+                  <div className="lg:col-span-1 glow-card p-4 rounded-2xl space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-bold text-white">Projects Roster</h3>
+                      <h3 className="text-sm font-bold text-slate-800">{t('projectsRoster')}</h3>
                       {isAdmin && (
                         <button
                           onClick={() => setShowNewProjectModal(true)}
                           className="p-1.5 rounded-lg bg-mti-600 hover:bg-mti-500 text-white text-xs flex items-center gap-1 font-semibold"
                         >
                           <Plus className="w-3.5 h-3.5" />
-                          New Project
+                          {t('newProject')}
                         </button>
                       )}
                     </div>
@@ -1009,66 +1638,66 @@ export default function Home() {
                           onClick={() => selectProject(proj.id)}
                           className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                             selectedProjectId === proj.id
-                              ? 'bg-slate-900 border-mti-500 shadow-lg shadow-mti-900/20'
-                              : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
+                              ? 'bg-white border-mti-500 shadow-lg shadow-mti-200/40'
+                              : 'bg-white/80 border-sky-100 hover:border-sky-200'
                           }`}
                         >
                           <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-mti-400">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600">
                               {proj.code}
                             </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-emerald-400">
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-emerald-600">
                               {proj.status}
                             </span>
                           </div>
-                          <div className="font-semibold text-white text-sm mt-1">{proj.name}</div>
+                          <div className="font-semibold text-slate-800 text-sm mt-1">{proj.name}</div>
                           <div className="text-xs text-slate-400 mt-0.5">{proj.clientName}</div>
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  <div className="lg:col-span-2 space-y-4">
-                    <h3 className="text-sm font-bold text-white">Sites Under Project</h3>
+                  <div className="lg:col-span-2 glow-card p-4 rounded-2xl space-y-4">
+                    <h3 className="text-sm font-bold text-slate-800">{t('sitesUnderProject')}</h3>
                     {loadingSites ? (
-                      <div className="p-8 text-center text-xs text-slate-500">Loading sites...</div>
+                      <div className="p-8 text-center text-xs text-slate-500">{t('loading')}</div>
                     ) : selectedProjectSites.length === 0 ? (
-                      <div className="p-8 rounded-2xl bg-slate-900/40 border border-slate-800 text-center text-xs text-slate-400">
-                        No sites assigned or active for this project yet.
+                      <div className="p-8 rounded-2xl bg-white/80 border border-sky-100 text-center text-xs text-slate-400">
+                        {t('noSitesYet')}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {selectedProjectSites.map((site) => (
-                          <div key={site.id} className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                          <div key={site.id} className="p-4 rounded-xl bg-white border border-sky-100 space-y-2">
                             <div className="flex items-center justify-between">
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-600/20 text-emerald-300">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-600">
                                 {site.code}
                               </span>
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300">{site.status}</span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600">{site.status}</span>
                             </div>
-                            <div className="font-semibold text-white text-sm">{site.name}</div>
+                            <div className="font-semibold text-slate-800 text-sm">{site.name}</div>
                             <p className="text-xs text-slate-400">{site.description}</p>
                             <div className="text-[11px] text-slate-400 flex items-center gap-1">
                               <MapPin className="w-3 h-3 text-slate-500" />
                               <span>{site.address || 'GPS Coordinates Set'}</span>
                             </div>
 
-                            <div className="mt-3 pt-2 border-t border-slate-800 text-[11px]">
-                              <div className="text-slate-400 font-medium mb-1">Assigned Field Engineers:</div>
+                            <div className="mt-3 pt-2 border-t border-sky-100 text-[11px]">
+                              <div className="text-slate-400 font-medium mb-1">{t('assignedEngineers')}:</div>
                               {site.assignments && site.assignments.length > 0 ? (
                                 <div className="space-y-1">
                                   {site.assignments.map((a) => (
                                     <div
                                       key={a.id}
-                                      className="flex items-center justify-between text-slate-300 bg-slate-950/60 px-2 py-1 rounded-md border border-slate-800/80"
+                                      className="flex items-center justify-between text-slate-600 bg-slate-50/80 px-2 py-1 rounded-md border border-sky-100"
                                     >
                                       <span>{a.engineerName}</span>
-                                      <span className="text-[10px] text-mti-400 font-medium">{a.role}</span>
+                                      <span className="text-[10px] text-mti-600 font-medium">{a.role}</span>
                                     </div>
                                   ))}
                                 </div>
                               ) : (
-                                <div className="text-slate-500 italic">No engineers assigned yet.</div>
+                                <div className="text-slate-500 italic">{t('noEngineersAssigned')}</div>
                               )}
                             </div>
                           </div>
@@ -1084,59 +1713,59 @@ export default function Home() {
               {/* ======================================================== */}
               {activeTab === 'approvals' && isAdmin && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="glow-card p-4 rounded-2xl flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-bold text-white">Dedicated Approval Center</h3>
-                      <p className="text-xs text-slate-400">Review submitted data sheets, inspections, and evidence</p>
+                      <h3 className="text-sm font-bold text-slate-800">{t('approvalCenterTitle')}</h3>
+                      <p className="text-xs text-slate-400">{t('approvalCenterSubtitle')}</p>
                     </div>
-                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      {pendingRecords.length} Pending Review
+                    <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 border border-amber-200 whitespace-nowrap">
+                      {pendingRecords.length} {t('pendingReview')}
                     </span>
                   </div>
 
                   {pendingRecords.length === 0 ? (
-                    <div className="glass-panel p-12 text-center rounded-2xl border border-slate-800 text-xs text-slate-400">
-                      <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
-                      All engineer submissions have been reviewed and approved!
+                    <div className="glow-card p-12 text-center rounded-2xl text-xs text-slate-400">
+                      <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+                      {t('allReviewed')}
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      {pendingRecords.map((r) => (
-                        <div key={r.id} className="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+                      {(Array.isArray(pendingRecords) ? pendingRecords : []).map((r) => (
+                        <div key={r.id} className="glow-card p-5 rounded-2xl space-y-3">
                           <div className="flex items-start justify-between">
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-600 border border-amber-200">
                                   {r.category}
                                 </span>
-                                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">v{r.version}</span>
+                                <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-400">v{r.version}</span>
                               </div>
-                              <h4 className="font-semibold text-white text-sm mt-1">{r.title}</h4>
+                              <h4 className="font-semibold text-slate-800 text-sm mt-1">{r.title}</h4>
                               <div className="text-xs text-slate-400 mt-0.5">
-                                Project: <span className="text-slate-200">{r.projectName}</span> &bull; Site:{' '}
-                                <span className="text-slate-200">{r.siteName}</span>
+                                Project: <span className="text-slate-700">{r.projectName}</span> &bull; Site:{' '}
+                                <span className="text-slate-700">{r.siteName}</span>
                               </div>
                             </div>
 
                             <div className="text-right text-xs text-slate-400">
-                              <div>Submitted by: <span className="text-white font-medium">{r.submitterName}</span></div>
+                              <div>{t('submittedBy')}: <span className="text-slate-800 font-medium">{r.submitterName}</span></div>
                               <div className="text-[11px] text-slate-500">{new Date(r.createdAt).toLocaleString()}</div>
                             </div>
                           </div>
 
                           {r.dataPayloadJson && (
-                            <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-400 overflow-x-auto">
+                            <div className="p-3 rounded-xl bg-sky-50 border border-sky-100 text-xs font-mono text-emerald-600 overflow-x-auto">
                               <pre>{r.dataPayloadJson}</pre>
                             </div>
                           )}
 
-                          <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-4">
+                          <div className="pt-2 border-t border-sky-100 flex items-center justify-between gap-4">
                             <input
                               type="text"
                               value={approvalComment}
                               onChange={(e) => setApprovalComment(e.target.value)}
-                              placeholder="Review comments / rejection reasons / modification guidance..."
-                              className="flex-1 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-mti-500"
+                              placeholder={t('commentsPlaceholder')}
+                              className="flex-1 px-3 py-1.5 bg-white border border-sky-100 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-mti-500"
                             />
 
                             <div className="flex items-center gap-2">
@@ -1144,19 +1773,19 @@ export default function Home() {
                                 onClick={() => promptRequestChanges(r)}
                                 className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold"
                               >
-                                Request Changes
+                                {t('requestChanges')}
                               </button>
                               <button
                                 onClick={() => promptReject(r)}
                                 className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold"
                               >
-                                Reject
+                                {t('reject')}
                               </button>
                               <button
                                 onClick={() => promptApprove(r)}
                                 className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
                               >
-                                Approve
+                                {t('approve')}
                               </button>
                             </div>
                           </div>
@@ -1173,14 +1802,14 @@ export default function Home() {
               {(activeTab === 'project-data' || activeTab === 'my-data') && (
                 <div className="space-y-6">
                   {!isAdmin && (
-                    <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
-                      <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                        <Upload className="w-4 h-4 text-mti-400" />
-                        Submit New Field Report / Operational Data
+                    <div className="glow-card p-6 rounded-2xl space-y-4">
+                      <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        <Upload className="w-4 h-4 text-mti-600" />
+                        {t('submitDataTitle')}
                       </h3>
 
                       {submitSuccess && (
-                        <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
+                        <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-600 text-xs flex items-center gap-2">
                           <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                           <span>{submitSuccess}</span>
                         </div>
@@ -1189,11 +1818,11 @@ export default function Home() {
                       <form onSubmit={handleSubmitData} className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <label className="block text-xs font-semibold text-slate-300 mb-1">Target Project</label>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">{t('targetProject')}</label>
                             <select
                               value={selectedProjectId || ''}
                               onChange={(e) => selectProject(e.target.value)}
-                              className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                              className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                             >
                               {projects.map((p) => (
                                 <option key={p.id} value={p.id}>
@@ -1204,11 +1833,11 @@ export default function Home() {
                           </div>
 
                           <div>
-                            <label className="block text-xs font-semibold text-slate-300 mb-1">Data Category</label>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">{t('dataCategory')}</label>
                             <select
                               value={submitCategory}
                               onChange={(e) => setSubmitCategory(e.target.value)}
-                              className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                              className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                             >
                               <option value="DailyReport">Daily Report</option>
                               <option value="SiteReport">Site Report</option>
@@ -1221,32 +1850,32 @@ export default function Home() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-slate-300 mb-1">Submission Title</label>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">{t('submissionTitle')}</label>
                           <input
                             type="text"
                             value={submitTitle}
                             onChange={(e) => setSubmitTitle(e.target.value)}
                             placeholder="e.g. Soil Foundation Settlement - Sector A"
                             required
-                            className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                            className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-xs font-semibold text-slate-300 mb-1">Data Payload (JSON / Key-Values)</label>
+                          <label className="block text-xs font-semibold text-slate-600 mb-1">{t('dataPayload')}</label>
                           <textarea
                             value={submitPayload}
                             onChange={(e) => setSubmitPayload(e.target.value)}
                             rows={4}
-                            className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl font-mono text-xs text-emerald-400"
+                            className="w-full px-3 py-2 bg-white border border-sky-100 rounded-xl font-mono text-xs text-emerald-600"
                           />
                         </div>
 
                         {/* File Upload Dropzone (Prompt 20) */}
-                        <div className="border-2 border-dashed border-slate-800 hover:border-mti-500/50 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-950/40">
+                        <div className="border-2 border-dashed border-sky-100 hover:border-mti-300 rounded-xl p-4 text-center cursor-pointer transition-colors bg-slate-50/70">
                           <Upload className="w-6 h-6 text-slate-500 mx-auto mb-1" />
-                          <div className="text-xs text-slate-300 font-medium">Attach Images, Documents, or Sheets</div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">B2 Private Storage &bull; PDF, JPG, PNG, XLSX up to 100MB</div>
+                          <div className="text-xs text-slate-600 font-medium">{t('attachFiles')}</div>
+                          <div className="text-[10px] text-slate-500 mt-0.5">{t('attachSubtext')}</div>
                         </div>
 
                         <div className="flex items-center justify-end gap-2 pt-2">
@@ -1255,7 +1884,7 @@ export default function Home() {
                             className="px-4 py-2 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold flex items-center gap-1.5"
                           >
                             <Send className="w-3.5 h-3.5" />
-                            Submit Data Record
+                            {t('submitReportBtn')}
                           </button>
                         </div>
                       </form>
@@ -1263,34 +1892,34 @@ export default function Home() {
                   )}
 
                   {/* Approved Records (Immutable) */}
-                  <div className="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
-                    <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                      <FileCheck className="w-4 h-4 text-emerald-400" />
-                      Approved Historical Records (Permanent & Immutable)
+                  <div className="glow-card p-5 rounded-2xl space-y-3">
+                    <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                      <FileCheck className="w-4 h-4 text-emerald-600" />
+                      {t('approvedHistoryTitle')}
                     </h3>
 
                     {approvedRecords.length === 0 ? (
-                      <p className="text-xs text-slate-500 py-4 text-center">No approved records available.</p>
+                      <p className="text-xs text-slate-500 py-4 text-center">{t('noApprovedRecords')}</p>
                     ) : (
-                      <div className="divide-y divide-slate-800/60">
-                        {approvedRecords.map((r) => (
+                      <div className="divide-y divide-sky-100">
+                        {(Array.isArray(approvedRecords) ? approvedRecords : []).map((r) => (
                           <div
                             key={r.id}
                             onClick={() => setDrawerData({ title: r.title, type: 'Approved Data', details: r })}
-                            className="py-3 flex items-center justify-between hover:bg-slate-900/40 px-2 rounded-lg cursor-pointer"
+                            className="py-3 flex items-center justify-between hover:bg-white/80 px-2 rounded-lg cursor-pointer"
                           >
                             <div>
                               <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-600">
                                   {r.category}
                                 </span>
-                                <span className="font-semibold text-white text-xs">{r.title}</span>
+                                <span className="font-semibold text-slate-800 text-xs">{r.title}</span>
                               </div>
                               <div className="text-[11px] text-slate-400 mt-0.5">
                                 Submitter: {r.submitterName} &bull; Approved: {r.approvedAt ? new Date(r.approvedAt).toLocaleDateString() : 'N/A'}
                               </div>
                             </div>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-emerald-400 font-medium">
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-emerald-600 font-medium">
                               Immutable (v{r.version})
                             </span>
                           </div>
@@ -1306,10 +1935,10 @@ export default function Home() {
               {/* ======================================================== */}
               {(activeTab === 'tasks' || activeTab === 'my-tasks') && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="glow-card p-4 rounded-2xl flex items-center justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-bold text-white">Operational Tasks Board</h3>
-                      <p className="text-xs text-slate-400">Milestone assignments, due dates, and evidence completion</p>
+                      <h3 className="text-sm font-bold text-slate-800">{t('tasksBoardTitle')}</h3>
+                      <p className="text-xs text-slate-400">{t('tasksBoardSubtitle')}</p>
                     </div>
 
                     {isAdmin && (
@@ -1318,43 +1947,43 @@ export default function Home() {
                         className="px-3 py-1.5 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold flex items-center gap-1.5"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        Create Task
+                        {t('createTask')}
                       </button>
                     )}
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {tasks.map((task) => (
-                      <div key={task.id} className="glass-panel p-4 rounded-xl border border-slate-800 space-y-2">
+                    {(Array.isArray(tasks) ? tasks : []).map((task) => (
+                      <div key={task.id} className="glow-card p-4 rounded-xl space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-mti-400">
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600">
                             {task.taskNumber}
                           </span>
                           <span
                             className={`text-[10px] px-2 py-0.5 rounded font-semibold ${
                               task.priority === 'Urgent' || task.priority === 'High'
-                                ? 'bg-rose-500/20 text-rose-300'
-                                : 'bg-slate-800 text-slate-300'
+                                ? 'bg-rose-50 text-rose-600'
+                                : 'bg-slate-100 text-slate-600'
                             }`}
                           >
                             {task.priority}
                           </span>
                         </div>
 
-                        <div className="font-semibold text-white text-sm">{task.title}</div>
+                        <div className="font-semibold text-slate-800 text-sm">{task.title}</div>
                         <div className="text-xs text-slate-400">
-                          Project: <span className="text-slate-300">{task.projectName || 'Active'}</span>
+                          Project: <span className="text-slate-600">{task.projectName || 'Active'}</span>
                         </div>
 
-                        <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                        <div className="pt-2 border-t border-sky-100 flex items-center justify-between">
                           <div className="text-[11px] text-slate-400">
-                            Assigned: <span className="text-white font-medium">{task.assignedToName || 'Field Engineer'}</span>
+                            Assigned: <span className="text-slate-800 font-medium">{task.assignedToName || 'Field Engineer'}</span>
                           </div>
 
                           <select
                             value={task.status}
                             onChange={(e) => handleTaskStatusChange(task.id, e.target.value)}
-                            className="px-2 py-1 bg-slate-900 border border-slate-800 rounded-lg text-xs text-slate-200"
+                            className="px-2 py-1 bg-white border border-sky-100 rounded-lg text-xs text-slate-700"
                           >
                             <option value="ToDo">To Do</option>
                             <option value="InProgress">In Progress</option>
@@ -1371,119 +2000,217 @@ export default function Home() {
               {/* ======================================================== */}
               {/* VIEW: CHAT (Prompt 13 & 20) */}
               {/* ======================================================== */}
+              {/* VIEW: CHAT & WHATSAPP MESSAGE STATUSES */}
               {activeTab === 'chat' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[650px] glass-panel rounded-2xl border border-slate-800 overflow-hidden">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6 h-[700px] glass-panel rounded-2xl border border-sky-100 overflow-hidden shadow-xl">
                   {/* Left Conversations Pane */}
-                  <div className="md:col-span-1 border-r border-slate-800 flex flex-col bg-slate-950/40">
-                    <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                      <h3 className="font-bold text-white text-xs">Direct Conversations</h3>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-mti-400 font-semibold">
-                        {conversations.length} Active
-                      </span>
+                  <div className="md:col-span-1 border-r border-sky-100 flex flex-col bg-sky-50/50">
+                    <div className="p-3.5 border-b border-sky-100 flex items-center justify-between">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                          <MessageCircle className="w-4 h-4 text-sky-600" />
+                          <span>{t('conversations')}</span>
+                        </h3>
+                        <span className="text-[10px] text-slate-400">
+                          {conversations.length} {lang === 'ar' ? 'محادثات نشطة' : 'active chats'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setShowNewChatModal(true)}
+                        className="px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-slate-800 text-xs font-semibold flex items-center gap-1 transition-colors shadow-sm"
+                        title={t('startChat')}
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>{t('startChat')}</span>
+                      </button>
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                      {conversations.map((c) => {
-                        const otherMember = c.members.find((m) => m.userId !== currentUser.id);
-                        const isSelected = activeConversation?.id === c.id;
-                        return (
-                          <div
-                            key={c.id}
-                            onClick={() => openConversation(c)}
-                            className={`p-3 rounded-xl cursor-pointer transition-all ${
-                              isSelected
-                                ? 'bg-mti-600/20 border border-mti-500/40 text-white'
-                                : 'hover:bg-slate-900 text-slate-300'
-                            }`}
+                      {conversations.length === 0 ? (
+                        <div className="p-8 text-center text-xs text-slate-500 space-y-2">
+                          <MessageSquare className="w-8 h-8 text-slate-600 mx-auto opacity-50" />
+                          <p>{t('noConversationsFound')}</p>
+                          <button
+                            onClick={() => setShowNewChatModal(true)}
+                            className="text-xs text-sky-600 font-semibold hover:underline"
                           >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold text-xs text-white">
-                                {c.title || otherMember?.userName || 'Direct Chat'}
-                              </span>
-                              {c.unreadCount > 0 && (
-                                <span className="px-1.5 py-0.2 rounded-full bg-mti-600 text-white text-[10px] font-bold">
-                                  {c.unreadCount}
-                                </span>
-                              )}
+                            {t('startChat')}
+                          </button>
+                        </div>
+                      ) : (
+                        conversations.map((c) => {
+                          const otherMember = c.members.find((m) => m.userId !== currentUser.id);
+                          const isSelected = activeConversation?.id === c.id;
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => openConversation(c)}
+                              className={`p-3 rounded-xl cursor-pointer transition-all flex items-center gap-3 ${
+                                isSelected
+                                  ? 'bg-sky-600/20 border border-sky-500/40 text-slate-800 shadow-sm'
+                                  : 'hover:bg-slate-50 text-slate-600 border border-transparent'
+                              }`}
+                            >
+                              <div className="w-9 h-9 rounded-full bg-sky-500/20 border border-sky-400/30 flex items-center justify-center font-bold text-xs text-sky-600 flex-shrink-0">
+                                {(otherMember?.userName || 'C')[0]}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-semibold text-xs text-slate-800 truncate">
+                                    {c.title || otherMember?.userName || 'Direct Chat'}
+                                  </span>
+                                  {c.unreadCount > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded-full bg-sky-500 text-slate-800 text-[10px] font-bold">
+                                      {c.unreadCount}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                                  {c.lastMessage?.content || 'No messages yet'}
+                                </div>
+                              </div>
                             </div>
-                            <div className="text-[11px] text-slate-400 truncate mt-1">
-                              {c.lastMessage?.content || 'No messages yet'}
-                            </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })
+                      )}
                     </div>
                   </div>
 
                   {/* Right Message Stream Pane */}
-                  <div className="md:col-span-2 flex flex-col bg-slate-950/20">
+                  <div className="md:col-span-2 flex flex-col bg-sky-50/60">
                     {activeConversation ? (
                       <>
-                        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                          <div>
-                            <h4 className="font-bold text-white text-xs">
-                              {activeConversation.title ||
+                        {/* Conversation Top Header */}
+                        <div className="p-3.5 border-b border-sky-100 flex items-center justify-between bg-white/80">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-sky-500/20 border border-sky-400/30 flex items-center justify-center font-bold text-xs text-sky-600">
+                              {(activeConversation.title ||
                                 activeConversation.members.find((m) => m.userId !== currentUser.id)?.userName ||
-                                'Direct Chat'}
-                            </h4>
-                            <div className="text-[10px] text-slate-400">Server-Controlled Read States &bull; SignalR Connected</div>
+                                'C')[0]}
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-slate-800 text-xs">
+                                {activeConversation.title ||
+                                  activeConversation.members.find((m) => m.userId !== currentUser.id)?.userName ||
+                                  'Direct Chat'}
+                              </h4>
+                              <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                <span>{t('online')}</span>
+                                <span>&bull;</span>
+                                <span className="font-mono text-[9px] text-sky-600">SignalR Real-Time Sync</span>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
+                        {/* Messages Stream */}
                         <div className="flex-1 overflow-y-auto p-4 space-y-3">
                           {chatMessages.map((m) => {
                             const isMe = m.senderUserId === currentUser.id;
+                            const isRead =
+                              (m.readStates && m.readStates.some((rs) => rs.userId !== currentUser.id)) ||
+                              m.deliveryStatus === 'read';
+                            const isDelivered =
+                              isRead || m.isDelivered || deliveredMessageIds.has(m.id) || m.deliveryStatus === 'delivered';
+
                             return (
                               <div key={m.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                                <div className="text-[10px] text-slate-500 mb-0.5">{m.senderName}</div>
+                                <div className="text-[10px] text-slate-500 mb-0.5 px-1">{m.senderName}</div>
                                 <div
-                                  className={`p-3 rounded-2xl max-w-sm text-xs space-y-1 ${
-                                    isMe ? 'bg-mti-600 text-white' : 'bg-slate-900 border border-slate-800 text-slate-200'
+                                  className={`p-3 rounded-2xl max-w-sm sm:max-w-md text-xs space-y-1.5 shadow-md ${
+                                    isMe
+                                      ? 'bg-sky-600 text-white rounded-br-xs'
+                                      : 'bg-white border border-sky-100 text-slate-800 rounded-bl-xs'
                                   }`}
                                 >
-                                  <p>{m.content}</p>
-                                  {m.isEdited && <span className="text-[9px] opacity-70 italic">(edited)</span>}
+                                  <p className="leading-relaxed break-words">{m.content}</p>
+                                  {m.isEdited && <span className="text-[9px] opacity-70 italic block">(edited)</span>}
+
+                                  {/* WhatsApp Style Timestamp & Delivery Checkmarks */}
+                                  <div
+                                    className={`flex items-center gap-1 text-[10px] ${
+                                      isMe ? 'justify-end text-sky-100/70' : 'justify-end text-slate-400'
+                                    }`}
+                                  >
+                                    <span>
+                                      {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                    {isMe && (
+                                      <span className="inline-flex items-center ml-0.5">
+                                        {m.deliveryStatus === 'sending' ? (
+                                          <span title={t('chatStatusSending')} className="inline-flex items-center">
+                                            <Clock className="w-3 h-3 text-slate-600 animate-spin" />
+                                          </span>
+                                        ) : m.deliveryStatus === 'failed' ? (
+                                          <span
+                                            onClick={() => handleSendMessage({ preventDefault: () => {} } as any)}
+                                            title={t('chatStatusFailed')}
+                                            className="inline-flex items-center cursor-pointer text-rose-600"
+                                          >
+                                            <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                                          </span>
+                                        ) : isRead ? (
+                                          <span title={t('chatStatusRead')} className="inline-flex items-center">
+                                            <CheckCheck className="w-3.5 h-3.5 text-sky-600 filter drop-shadow-[0_0_4px_rgba(56,189,248,0.9)]" />
+                                          </span>
+                                        ) : isDelivered ? (
+                                          <span title={t('chatStatusDelivered')} className="inline-flex items-center">
+                                            <CheckCheck className="w-3.5 h-3.5 text-slate-600" />
+                                          </span>
+                                        ) : (
+                                          <span title={t('chatStatusSent')} className="inline-flex items-center">
+                                            <Check className="w-3.5 h-3.5 text-slate-600" />
+                                          </span>
+                                        )}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
 
-                                <div className="flex items-center gap-2 mt-1">
+                                {/* Reactions */}
+                                <div className="flex items-center gap-2 mt-1 px-1">
                                   <button
                                     onClick={() => handleToggleReaction(m.id, 'thumbs_up')}
-                                    className="text-[10px] text-slate-500 hover:text-amber-400 flex items-center gap-1"
+                                    className="text-[10px] text-slate-500 hover:text-amber-600 flex items-center gap-1 transition-colors"
                                   >
                                     <ThumbsUp className="w-3 h-3" />
                                     {m.reactions && m.reactions.length > 0 && <span>{m.reactions.length}</span>}
                                   </button>
-                                  {isMe && m.readStates && m.readStates.length > 0 && (
-                                    <span className="text-[9px] text-emerald-400 flex items-center gap-0.5">
-                                      <CheckCircle2 className="w-2.5 h-2.5" /> Read
-                                    </span>
-                                  )}
                                 </div>
                               </div>
                             );
                           })}
                         </div>
 
-                        <form onSubmit={handleSendMessage} className="p-3 border-t border-slate-800 flex items-center gap-2">
+                        {/* Send Message Form */}
+                        <form onSubmit={handleSendMessage} className="p-3 border-t border-sky-100 flex items-center gap-2 bg-white/30">
                           <input
                             type="text"
                             value={newMessageText}
                             onChange={(e) => setNewMessageText(e.target.value)}
-                            placeholder="Type a message..."
-                            className="flex-1 px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-mti-500"
+                            placeholder={t('typeMessagePlaceholder')}
+                            className="flex-1 px-3.5 py-2.5 bg-white border border-sky-100 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-sky-500 transition-colors"
                           />
                           <button
                             type="submit"
-                            className="p-2 rounded-xl bg-mti-600 hover:bg-mti-500 text-white transition-colors"
+                            className="p-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-slate-800 transition-colors shadow-sm flex-shrink-0"
+                            title={t('send')}
                           >
                             <Send className="w-4 h-4" />
                           </button>
                         </form>
                       </>
                     ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-slate-500">
-                        <MessageSquare className="w-8 h-8 text-slate-600 mb-2" />
-                        Select a conversation from the left to start communicating securely.
+                      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-slate-500 space-y-3">
+                        <MessageSquare className="w-12 h-12 text-slate-600 opacity-40 mx-auto" />
+                        <p>{t('noConversationsFound')}</p>
+                        <button
+                          onClick={() => setShowNewChatModal(true)}
+                          className="px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-slate-800 text-xs font-semibold transition-colors"
+                        >
+                          {t('startChat')}
+                        </button>
                       </div>
                     )}
                   </div>
@@ -1498,71 +2225,75 @@ export default function Home() {
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <h3 className="text-sm font-display font-bold text-white">Users Directory</h3>
-                        <p className="text-xs text-slate-400">Provision, deactivate, and assign role permissions</p>
+                        <h3 className="text-sm font-display font-bold text-slate-800">{t('usersDirectory')}</h3>
+                        <p className="text-xs text-slate-400">{t('usersSubtitle')}</p>
                       </div>
 
                       <button
                         onClick={() => setShowNewUserModal(true)}
-                        className="px-3 py-1.5 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold flex items-center gap-1.5"
+                        className="px-3 py-1.5 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        Provision User
+                        {t('provisionUser')}
                       </button>
                     </div>
 
-                    <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
-                      <table className="w-full text-left text-xs text-slate-300">
-                        <thead className="bg-slate-900/60 border-b border-slate-800 text-slate-400 uppercase text-[10px]">
+                    <div className="glow-card rounded-2xl overflow-x-auto">
+                      <table className="w-full text-start text-xs text-slate-600 min-w-[650px]">
+                        <thead className="bg-slate-50 border-b border-sky-100 text-slate-400 uppercase text-[10px]">
                           <tr>
-                            <th className="p-3">User</th>
-                            <th className="p-3">Email</th>
-                            <th className="p-3">Role</th>
-                            <th className="p-3">Status</th>
-                            <th className="p-3 text-right">Actions</th>
+                            <th className="p-3 text-start">{t('userColName')}</th>
+                            <th className="p-3 text-start">{t('userColJobTitle')}</th>
+                            <th className="p-3 text-start">{t('userColEmail')}</th>
+                            <th className="p-3 text-start">{t('userColRole')}</th>
+                            <th className="p-3 text-start">{t('userColStatus')}</th>
+                            <th className="p-3 text-end">{t('userColActions')}</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800/60">
+                        <tbody className="divide-y divide-sky-100">
                           {userList.map((u) => (
-                            <tr key={u.id} className="hover:bg-slate-900/40">
-                              <td className="p-3 font-semibold text-white">
+                            <tr key={u.id} className="hover:bg-white/80 transition-colors">
+                              <td className="p-3 font-semibold text-slate-800">
                                 {u.firstName} {u.lastName}
                               </td>
-                              <td className="p-3 text-slate-400">{u.email}</td>
+                              <td className="p-3 text-sky-600 font-medium">
+                                {u.jobTitle || '—'}
+                              </td>
+                              <td className="p-3 text-slate-400 font-mono text-[11px]">{u.email}</td>
                               <td className="p-3">
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-mti-400">
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600">
                                   {u.roles?.join(', ') || 'Engineer'}
                                 </span>
                               </td>
                               <td className="p-3">
-                                <span className={`text-[10px] px-2 py-0.5 rounded ${u.isActive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {u.isActive ? 'Active' : 'Disabled'}
+                                <span className={`text-[10px] px-2 py-0.5 rounded ${u.isActive ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
+                                  {u.isActive ? t('statusActive') : t('statusDisabled')}
                                 </span>
                               </td>
-                              <td className="p-3 text-right space-x-2">
+                              <td className="p-3 text-end space-x-2 rtl:space-x-reverse">
                                 <button
                                   onClick={async () => {
-                                    const newPass = prompt('Enter new password for user:');
+                                    const newPass = prompt(lang === 'ar' ? 'أدخل كلمة المرور الجديدة للمستخدم:' : 'Enter new password for user:');
                                     if (newPass) {
                                       await dashboardService.resetPassword(u.id, newPass);
-                                      alert('Password successfully reset.');
+                                      alert(lang === 'ar' ? 'تم إعادة تعيين كلمة المرور بنجاح.' : 'Password successfully reset.');
                                     }
                                   }}
-                                  className="text-[11px] text-amber-400 hover:underline"
+                                  className="text-[11px] text-amber-600 hover:underline"
                                 >
-                                  Reset Pass
+                                  {t('actionResetPass')}
                                 </button>
                                 <button
                                   onClick={async () => {
-                                    if (confirm(`Deactivate ${u.email}?`)) {
+                                    if (confirm(lang === 'ar' ? `هل أنت متأكد من تعطيل حساب ${u.email}؟` : `Deactivate ${u.email}?`)) {
                                       await dashboardService.deleteUser(u.id);
                                       const updated = await dashboardService.getUsers();
                                       setUserList(updated);
                                     }
                                   }}
-                                  className="text-[11px] text-rose-400 hover:underline"
+                                  className="text-[11px] text-rose-600 hover:underline"
                                 >
-                                  Deactivate
+                                  {t('actionDeactivate')}
                                 </button>
                               </td>
                             </tr>
@@ -1581,8 +2312,8 @@ export default function Home() {
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-sm font-bold text-white">Append-Only Enterprise Audit Trail</h3>
-                      <p className="text-xs text-slate-400">Tamper-evident logs of all security, project, and data operations</p>
+                      <h3 className="text-sm font-bold text-slate-800">{t('auditTitle')}</h3>
+                      <p className="text-xs text-slate-400">{t('auditSubtitle')}</p>
                     </div>
 
                     <input
@@ -1592,28 +2323,28 @@ export default function Home() {
                         setAuditSearch(e.target.value);
                         dashboardService.getAuditLogs(1, 20, e.target.value).then((res) => setAuditLogs(res.items));
                       }}
-                      placeholder="Filter action, user, entity..."
-                      className="px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white"
+                      placeholder={t('auditSearchPlaceholder')}
+                      className="px-3 py-1.5 bg-white border border-sky-100 rounded-xl text-xs text-slate-800"
                     />
                   </div>
 
-                  <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
-                    <table className="w-full text-left text-xs text-slate-300">
-                      <thead className="bg-slate-900/60 border-b border-slate-800 text-slate-400 uppercase text-[10px]">
+                  <div className="glow-card rounded-2xl overflow-hidden">
+                    <table className="w-full text-left text-xs text-slate-600">
+                      <thead className="bg-slate-50 border-b border-sky-100 text-slate-400 uppercase text-[10px]">
                         <tr>
-                          <th className="p-3">Timestamp</th>
-                          <th className="p-3">Action</th>
-                          <th className="p-3">Entity</th>
-                          <th className="p-3">User</th>
-                          <th className="p-3">IP Address</th>
+                          <th className="p-3">{t('auditColTime')}</th>
+                          <th className="p-3">{t('auditColAction')}</th>
+                          <th className="p-3">{t('auditColEntity')}</th>
+                          <th className="p-3">{t('auditColUser')}</th>
+                          <th className="p-3">{t('auditColIp')}</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-800/60">
+                      <tbody className="divide-y divide-sky-100">
                         {auditLogs.map((log) => (
-                          <tr key={log.id} className="hover:bg-slate-900/40">
+                          <tr key={log.id} className="hover:bg-white/80">
                             <td className="p-3 text-[11px] text-slate-400">{new Date(log.createdAt).toLocaleString()}</td>
-                            <td className="p-3 font-semibold text-white">{log.action}</td>
-                            <td className="p-3 text-slate-300">
+                            <td className="p-3 font-semibold text-slate-800">{log.action}</td>
+                            <td className="p-3 text-slate-600">
                               {log.entityType} ({log.entityId?.substring(0, 8)}...)
                             </td>
                             <td className="p-3 text-slate-400">{log.userEmail || 'System'}</td>
@@ -1632,42 +2363,139 @@ export default function Home() {
               {activeTab === 'settings' && (
                 <div className="max-w-2xl mx-auto space-y-4">
                   <div>
-                    <h3 className="text-sm font-bold text-white">System Runtime Configuration</h3>
-                    <p className="text-xs text-slate-400">Public configuration delivered safely from GET /api/system/config</p>
+                    <h3 className="text-sm font-bold text-slate-800">{t('settingsTitle')}</h3>
+                    <p className="text-xs text-slate-400">{t('settingsSubtitle')}</p>
                   </div>
 
                   {safeConfig && (
-                    <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                        <span className="text-xs text-slate-400">Application Name</span>
-                        <span className="text-xs font-semibold text-white">{safeConfig.appName}</span>
+                    <div className="glow-card p-6 rounded-2xl space-y-4">
+                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                        <span className="text-xs text-slate-400">{t('appNameField')}</span>
+                        <span className="text-xs font-semibold text-slate-800">{safeConfig.appName}</span>
                       </div>
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                        <span className="text-xs text-slate-400">Environment</span>
-                        <span className="text-xs font-semibold text-emerald-400">{safeConfig.environment}</span>
+                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                        <span className="text-xs text-slate-400">{t('environmentField')}</span>
+                        <span className="text-xs font-semibold text-emerald-600">{safeConfig.environment}</span>
                       </div>
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                        <span className="text-xs text-slate-400">SignalR Hub Path</span>
-                        <span className="text-xs font-mono text-mti-400">{safeConfig.signalR?.hubPath}</span>
+                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                        <span className="text-xs text-slate-400">{t('signalRPathField')}</span>
+                        <span className="text-xs font-mono text-mti-600">{safeConfig.signalR?.hubPath}</span>
                       </div>
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                        <span className="text-xs text-slate-400">SignalR Enabled</span>
-                        <span className="text-xs font-semibold text-emerald-400">
+                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                        <span className="text-xs text-slate-400">{t('signalREnabledField')}</span>
+                        <span className="text-xs font-semibold text-emerald-600">
                           {safeConfig.signalR?.enabled ? 'True' : 'False'}
                         </span>
                       </div>
-                      <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-[11px] text-slate-400 space-y-1">
-                        <div className="font-semibold text-white flex items-center gap-1.5">
-                          <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                          Enterprise Security Hardened
+                      <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                        <span className="text-xs text-slate-400">{t('signalRUrlField')}</span>
+                        <span className="text-xs font-mono text-emerald-600">
+                          {safeConfig.signalR?.hubUrl || 'https://mtiapi.runasp.net/hubs/project'}
+                        </span>
+                      </div>
+                      <div className="p-3 rounded-xl bg-white border border-sky-100 text-[11px] text-slate-400 space-y-1">
+                        <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                          {t('securityHardened')}
                         </div>
                         <p>
-                          Zero database connection strings, JWT signing keys, or Backblaze B2 master secrets are exposed
-                          to client devices or browsers.
+                          {t('securityDetails')}
                         </p>
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ======================================================== */}
+              {/* VIEW: REAL-TIME NOTIFICATIONS CENTER */}
+              {/* ======================================================== */}
+              {activeTab === 'notifications' && (
+                <div className="max-w-3xl mx-auto space-y-4 animate-fade-up">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-display font-bold text-slate-800 flex items-center gap-2">
+                        <Bell className="w-4 h-4 text-mti-600" />
+                        Real-Time Notifications
+                      </h3>
+                      <p className="text-xs text-slate-400">
+                        Live SignalR instant notifications &bull; Auto-syncs across users and sites
+                      </p>
+                    </div>
+
+                    {notificationsList.some((n) => !n.isRead) && (
+                      <button
+                        onClick={async () => {
+                          await notificationService.markAllAsRead();
+                          setNotificationsList((prev) => prev.map((n) => ({ ...n, isRead: true })));
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-white/[0.08] border border-sky-100 text-xs text-slate-700 transition-colors"
+                      >
+                        Mark All as Read
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="glass-panel rounded-2xl border border-sky-100 overflow-hidden divide-y divide-sky-100">
+                    {notificationsList.length === 0 ? (
+                      <div className="p-12 text-center text-xs text-slate-500">
+                        <Bell className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-50" />
+                        No notifications yet. New live events from SignalR will appear here instantly.
+                      </div>
+                    ) : (
+                      notificationsList.map((notif) => (
+                        <div
+                          key={notif.id}
+                          onClick={async () => {
+                            if (!notif.isRead) {
+                              await notificationService.markAsRead(notif.id);
+                              setNotificationsList((prev) =>
+                                prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
+                              );
+                            }
+                          }}
+                          className={`p-4 transition-colors flex items-start gap-3.5 cursor-pointer ${
+                            notif.isRead ? 'bg-transparent hover:bg-white/30' : 'bg-mti-500/[0.05] hover:bg-mti-500/[0.08]'
+                          }`}
+                        >
+                          <div
+                            className={`p-2 rounded-xl border flex-shrink-0 ${
+                              notif.isRead
+                                ? 'bg-slate-100 border-sky-200 text-slate-400'
+                                : 'bg-mti-100 border-mti-200 text-mti-600 shadow-md shadow-mti-500/10'
+                            }`}
+                          >
+                            <Radio className="w-4 h-4" />
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <h4 className={`text-xs font-semibold ${notif.isRead ? 'text-slate-600' : 'text-slate-800'}`}>
+                                {notif.title}
+                              </h4>
+                              <span className="text-[10px] text-slate-500 flex-shrink-0">
+                                {new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                              {notif.body}
+                            </p>
+                            <div className="mt-2 flex items-center gap-2">
+                              <span className="text-[9px] px-2 py-0.5 rounded-full bg-slate-100/80 text-slate-400 border border-sky-200 uppercase tracking-wider font-semibold">
+                                {notif.type}
+                              </span>
+                              {!notif.isRead && (
+                                <span className="text-[9px] text-emerald-600 font-medium flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  New
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
             </>
@@ -1678,22 +2506,22 @@ export default function Home() {
       {/* 3. ENTERPRISE INSPECTION DRAWER (Prompt 20) */}
       {drawerData && (
         <div className="fixed inset-0 z-50 overflow-hidden">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setDrawerData(null)} />
-          <div className="fixed inset-y-0 right-0 max-w-md w-full bg-slate-950 border-l border-slate-800 p-6 flex flex-col shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="absolute inset-0 bg-slate-900/25 backdrop-blur-sm" onClick={() => setDrawerData(null)} />
+          <div className="fixed inset-y-0 right-0 max-w-md w-full bg-sky-50 border-l border-sky-100 p-6 flex flex-col shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-sky-100 pb-3">
               <div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-mti-400">
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 text-mti-600">
                   {drawerData.type}
                 </span>
-                <h3 className="font-bold text-white text-base mt-1">{drawerData.title}</h3>
+                <h3 className="font-bold text-slate-800 text-base mt-1">{drawerData.title}</h3>
               </div>
-              <button onClick={() => setDrawerData(null)} className="p-1 rounded-lg text-slate-400 hover:text-white">
+              <button onClick={() => setDrawerData(null)} className="p-1 rounded-lg text-slate-400 hover:text-slate-800">
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-3 text-xs text-slate-300">
-              <pre className="p-3 rounded-xl bg-slate-900 border border-slate-800 font-mono text-[11px] text-emerald-400 overflow-x-auto">
+            <div className="flex-1 overflow-y-auto space-y-3 text-xs text-slate-600">
+              <pre className="p-3 rounded-xl bg-white border border-sky-100 font-mono text-[11px] text-emerald-600 overflow-x-auto">
                 {JSON.stringify(drawerData.details, null, 2)}
               </pre>
             </div>
@@ -1703,20 +2531,20 @@ export default function Home() {
 
       {/* 4. CONFIRMATION DIALOG (Prompt 20) */}
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel max-w-sm w-full p-6 rounded-2xl border border-slate-800 shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-white">{confirmDialog.title}</h3>
-            <p className="text-xs text-slate-300">{confirmDialog.message}</p>
+        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-sm w-full p-6 rounded-2xl border border-sky-100 shadow-xl space-y-4">
+            <h3 className="text-base font-bold text-slate-800">{confirmDialog.title}</h3>
+            <p className="text-xs text-slate-600">{confirmDialog.message}</p>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setConfirmDialog((prev) => ({ ...prev, isOpen: false }))}
-                className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs font-medium"
+                className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 text-xs font-medium"
               >
                 Cancel
               </button>
               <button
                 onClick={confirmDialog.onConfirm}
-                className={`px-4 py-2 rounded-xl text-white text-xs font-semibold ${
+                className={`px-4 py-2 rounded-xl text-slate-800 text-xs font-semibold ${
                   confirmDialog.confirmColor || 'bg-mti-600 hover:bg-mti-500'
                 }`}
               >
@@ -1729,52 +2557,52 @@ export default function Home() {
 
       {/* 5. NEW PROJECT MODAL */}
       {showNewProjectModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-800 shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-4">Create New Engineering Project</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-sky-100 shadow-xl">
+            <h3 className="text-base font-bold text-slate-800 mb-4">{t('createProject')}</h3>
             <form onSubmit={handleCreateProject} className="space-y-4">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Project Code</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('projectCode')}</label>
                 <input
                   type="text"
                   value={newCode}
                   onChange={(e) => setNewCode(e.target.value)}
                   placeholder="PRJ-2026-ALEX"
                   required
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Project Name</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('projectName')}</label>
                 <input
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Alexandria Port Hub"
                   required
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Client Name</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('clientName')}</label>
                 <input
                   type="text"
                   value={newClient}
                   onChange={(e) => setNewClient(e.target.value)}
                   placeholder="Port Authority"
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Description</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('description')}</label>
                 <textarea
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
                   rows={2}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 />
               </div>
 
@@ -1782,15 +2610,15 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowNewProjectModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-900 text-slate-300 text-xs"
+                  className="px-4 py-2 rounded-xl bg-white text-slate-600 text-xs"
                 >
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"
                   className="px-4 py-2 rounded-xl bg-mti-600 text-white text-xs font-semibold"
                 >
-                  Create Project
+                  {t('createProject')}
                 </button>
               </div>
             </form>
@@ -1800,33 +2628,33 @@ export default function Home() {
 
       {/* 6. NEW TASK MODAL */}
       {showNewTaskModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-800 shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-4">Create Site Milestone Task</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-sky-100 shadow-xl">
+            <h3 className="text-base font-bold text-slate-800 mb-4">{t('createTask')}</h3>
             <form onSubmit={handleCreateTask} className="space-y-4">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Task Title</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('taskTitle')}</label>
                 <input
                   type="text"
                   value={newTaskTitle}
                   onChange={(e) => setNewTaskTitle(e.target.value)}
                   placeholder="Excavate foundation row B"
                   required
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Priority</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('priority')}</label>
                 <select
                   value={newTaskPriority}
                   onChange={(e) => setNewTaskPriority(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 >
-                  <option value="Low">Low</option>
-                  <option value="Medium">Medium</option>
-                  <option value="High">High</option>
-                  <option value="Urgent">Urgent</option>
+                  <option value="Low">{t('priorityLow')}</option>
+                  <option value="Medium">{t('priorityMedium')}</option>
+                  <option value="High">{t('priorityHigh')}</option>
+                  <option value="Urgent">{t('priorityUrgent')}</option>
                 </select>
               </div>
 
@@ -1834,7 +2662,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowNewTaskModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-900 text-slate-300 text-xs"
+                  className="px-4 py-2 rounded-xl bg-white text-slate-600 text-xs"
                 >
                   Cancel
                 </button>
@@ -1842,7 +2670,7 @@ export default function Home() {
                   type="submit"
                   className="px-4 py-2 rounded-xl bg-mti-600 text-white text-xs font-semibold"
                 >
-                  Create Task
+                  {t('createTask')}
                 </button>
               </div>
             </form>
@@ -1852,66 +2680,87 @@ export default function Home() {
 
       {/* 7. NEW USER MODAL */}
       {showNewUserModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-800 shadow-2xl">
-            <h3 className="text-base font-bold text-white mb-4">Provision Corporate User</h3>
+        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-sky-100 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-slate-800">{t('createCorporateUser')}</h3>
+              <button
+                type="button"
+                onClick={() => setShowNewUserModal(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
             <form onSubmit={handleCreateUser} className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">First Name</label>
+                  <label className="block text-xs text-slate-400 mb-1">{t('firstName')}</label>
                   <input
                     type="text"
                     value={newFirstName}
                     onChange={(e) => setNewFirstName(e.target.value)}
                     required
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                    className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Last Name</label>
+                  <label className="block text-xs text-slate-400 mb-1">{t('lastName')}</label>
                   <input
                     type="text"
                     value={newLastName}
                     onChange={(e) => setNewLastName(e.target.value)}
                     required
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                    className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Corporate Email</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('jobTitle')}</label>
+                <input
+                  type="text"
+                  value={newUserJobTitle}
+                  onChange={(e) => setNewUserJobTitle(e.target.value)}
+                  placeholder={t('jobTitlePlaceholder')}
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">{t('corporateEmail')}</label>
                 <input
                   type="email"
                   value={newUserEmail}
                   onChange={(e) => setNewUserEmail(e.target.value)}
                   placeholder="field.engineer@mti.com"
                   required
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Initial Password</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('initialPassword')}</label>
                 <input
                   type="password"
                   value={newUserPassword}
                   onChange={(e) => setNewUserPassword(e.target.value)}
                   required
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Role Assignment</label>
+                <label className="block text-xs text-slate-400 mb-1">{t('roleAssignment')}</label>
                 <select
                   value={newUserRole}
                   onChange={(e) => setNewUserRole(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-white text-xs"
+                  className="w-full px-3 py-2 bg-white border border-sky-200 rounded-xl text-slate-700 text-xs"
                 >
-                  <option value="Engineer">Field Engineer</option>
-                  <option value="ProjectManager">Project Manager</option>
-                  <option value="Admin">System Administrator</option>
+                  <option value="Engineer">{t('userRoleEngineer')}</option>
+                  <option value="ProjectManager">{t('userRolePM')}</option>
+                  <option value="Admin">{t('userRoleAdmin')}</option>
                 </select>
               </div>
 
@@ -1919,19 +2768,178 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setShowNewUserModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-900 text-slate-300 text-xs"
+                  className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 text-xs transition-colors"
                 >
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-mti-600 text-white text-xs font-semibold"
+                  className="px-4 py-2 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold transition-colors shadow-sm"
                 >
-                  Provision User
+                  {t('provisionUser')}
                 </button>
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Start Direct Chat Modal / User Search */}
+      {showNewChatModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/30 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-sky-50 border border-sky-100 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-xl animate-fade-up">
+            <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-sky-600" />
+                <h3 className="font-bold text-slate-800 text-sm">{t('startChat')}</h3>
+              </div>
+              <button
+                onClick={() => setShowNewChatModal(false)}
+                className="p-1 rounded-lg hover:bg-sky-50 text-slate-400 hover:text-slate-800 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute start-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={chatSearchUser}
+                onChange={(e) => setChatSearchUser(e.target.value)}
+                placeholder={t('searchUsersChat')}
+                autoFocus
+                className="w-full ps-9 pe-4 py-2.5 bg-white/90 border border-sky-100 rounded-xl text-slate-800 text-xs placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors"
+              />
+            </div>
+
+            {/* Contacts list */}
+            <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+              {loadingContacts ? (
+                <div className="py-8 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-sky-600" />
+                  <span>{t('loading')}</span>
+                </div>
+              ) : chatContacts.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-500">
+                  {lang === 'ar' ? 'لم يتم العثور على مستخدمين بهذا الاسم' : 'No users found'}
+                </div>
+              ) : (
+                chatContacts.map((contact) => (
+                  <div
+                    key={contact.id}
+                    onClick={() => handleStartDirectChat(contact)}
+                    className="p-3 rounded-xl bg-sky-50/80 hover:bg-sky-500/10 border border-white/5 hover:border-sky-500/30 transition-all cursor-pointer flex items-center justify-between group"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-full bg-sky-500/20 border border-sky-400/30 flex items-center justify-center font-bold text-xs text-sky-600 flex-shrink-0">
+                        {(contact.fullName || 'U')[0]}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-xs text-slate-800 group-hover:text-sky-600 transition-colors truncate">
+                            {contact.fullName}
+                          </span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 border border-sky-200 text-slate-600 font-mono flex-shrink-0">
+                            {contact.role}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                          {contact.jobTitle && (
+                            <span className="text-sky-600/90 font-medium truncate">
+                              {contact.jobTitle}
+                            </span>
+                          )}
+                          {contact.jobTitle && <span className="text-slate-600">&bull;</span>}
+                          <span className="text-slate-500 truncate">{contact.email}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleStartDirectChat(contact);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-slate-800 text-xs font-semibold flex items-center gap-1 transition-colors flex-shrink-0 shadow-sm"
+                    >
+                      <span>{t('startChat')}</span>
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-sky-100">
+              <button
+                onClick={() => setShowNewChatModal(false)}
+                className="px-4 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-600 text-xs transition-colors"
+              >
+                {t('close')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Real-Time Notifications Container */}
+      {toasts.length > 0 && (
+        <div className="fixed bottom-5 end-5 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              onClick={() => {
+                if (toast.linkTab) setActiveTab(toast.linkTab);
+                if (toast.conversationId) {
+                  const conv = conversations.find((c) => c.id === toast.conversationId);
+                  if (conv) openConversation(conv);
+                }
+              }}
+              className={`p-3.5 rounded-2xl border shadow-xl backdrop-blur-xl pointer-events-auto cursor-pointer transition-all hover:scale-[1.02] flex items-start gap-3 animate-fade-up ${
+                toast.type === 'chat'
+                  ? 'bg-sky-950/90 border-sky-500/40 text-sky-100'
+                  : toast.type === 'task'
+                  ? 'bg-amber-950/90 border-amber-500/40 text-amber-100'
+                  : 'bg-sky-50/90 border-sky-100 text-slate-800'
+              }`}
+            >
+              <div
+                className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                  toast.type === 'chat'
+                    ? 'bg-sky-500/20 text-sky-600'
+                    : toast.type === 'task'
+                    ? 'bg-amber-50 text-amber-600'
+                    : 'bg-mti-100 text-mti-600'
+                }`}
+              >
+                {toast.type === 'chat' ? (
+                  <MessageSquare className="w-4 h-4" />
+                ) : toast.type === 'task' ? (
+                  <CheckSquare className="w-4 h-4" />
+                ) : (
+                  <Bell className="w-4 h-4" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-xs flex items-center justify-between">
+                  <span className="truncate">{toast.title}</span>
+                  <span className="text-[10px] text-slate-400 ms-2 font-mono">Real-time</span>
+                </div>
+                <p className="text-[11px] text-slate-600 line-clamp-2 mt-0.5 leading-relaxed">
+                  {toast.message}
+                </p>
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+                }}
+                className="text-slate-400 hover:text-slate-800 p-1 rounded-lg transition-colors flex-shrink-0"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>

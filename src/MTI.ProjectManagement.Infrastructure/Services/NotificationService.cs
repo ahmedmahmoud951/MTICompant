@@ -108,4 +108,28 @@ public class NotificationService : INotificationService
             _logger?.LogWarning(ex, "Failed to broadcast {Event} to site {SiteId}", eventName, siteId);
         }
     }
+
+    public async Task BroadcastToAdminsAsync(string eventName, object payload, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group("admins").SendAsync(eventName, payload, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to broadcast {Event} to admins", eventName);
+        }
+    }
+
+    public async Task BroadcastGlobalAsync(string eventName, object payload, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _hubContext.Clients.Group("global").SendAsync(eventName, payload, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to broadcast {Event} globally", eventName);
+        }
+    }
 }

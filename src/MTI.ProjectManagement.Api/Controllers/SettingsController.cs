@@ -43,6 +43,7 @@ public class SettingsController : ControllerBase
 
         var hubEnabled = bool.TryParse(settings.FirstOrDefault(s => s.Key == "HubEnabled")?.Value, out var he) && he;
         var hubPath = settings.FirstOrDefault(s => s.Key == "HubPath")?.Value ?? "/hubs/project";
+        var hubUrl = settings.FirstOrDefault(s => s.Key == "HubUrl")?.Value ?? "https://mtiapi.runasp.net/hubs/project";
         var reconnectEnabled = bool.TryParse(settings.FirstOrDefault(s => s.Key == "ReconnectEnabled")?.Value, out var re) && re;
 
         return Ok(new
@@ -53,6 +54,7 @@ public class SettingsController : ControllerBase
             {
                 enabled = hubEnabled,
                 hubPath,
+                hubUrl,
                 reconnectEnabled
             }
         });

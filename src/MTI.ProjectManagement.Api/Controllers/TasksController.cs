@@ -121,6 +121,7 @@ public class TasksController : ControllerBase
         {
             await _notificationService.BroadcastToSiteAsync(task.SiteId.Value, "TaskCreated", new { taskId = task.Id, title = task.Title }, cancellationToken);
         }
+        await _notificationService.BroadcastGlobalAsync("TaskCreated", new { taskId = task.Id, title = task.Title }, cancellationToken);
 
         return await GetById(task.Id, cancellationToken);
     }
@@ -390,6 +391,7 @@ public class TasksController : ControllerBase
         {
             await _notificationService.BroadcastToUserAsync(task.AssignedToUserId.Value, "TaskUpdated", new { taskId = task.Id, title = task.Title }, cancellationToken);
         }
+        await _notificationService.BroadcastGlobalAsync("TaskUpdated", new { taskId = task.Id, title = task.Title }, cancellationToken);
 
         return await GetById(task.Id, cancellationToken);
     }
@@ -487,6 +489,7 @@ public class TasksController : ControllerBase
         {
             await _notificationService.BroadcastToSiteAsync(task.SiteId.Value, targetStatus == TaskItemStatus.Completed ? "TaskCompleted" : "TaskUpdated", new { taskId = task.Id, title = task.Title, status = targetStatus.ToString() }, cancellationToken);
         }
+        await _notificationService.BroadcastGlobalAsync("TaskStatusChanged", new { taskId = task.Id, status = targetStatus.ToString() }, cancellationToken);
 
         return Ok(new { success = true, status = task.Status.ToString() });
     }

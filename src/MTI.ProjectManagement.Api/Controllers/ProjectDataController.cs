@@ -550,8 +550,9 @@ public class ProjectDataController : ControllerBase
             record.Id.ToString(),
             cancellationToken);
 
-        // Broadcast to site and project
+        // Broadcast to site and global
         await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataApproved", new { dataId = record.Id, title = record.Title }, cancellationToken);
+        await _notificationService.BroadcastGlobalAsync("ProjectDataApproved", new { dataId = record.Id, title = record.Title }, cancellationToken);
 
         return Ok(new { success = true, status = record.Status.ToString() });
     }
@@ -607,6 +608,8 @@ public class ProjectDataController : ControllerBase
             cancellationToken);
 
         await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken);
+        await _notificationService.BroadcastToAdminsAsync("ProjectDataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken);
+        await _notificationService.BroadcastToUserAsync(record.SubmittedBy, "ProjectDataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken);
 
         return Ok(new { success = true, status = record.Status.ToString() });
     }
@@ -727,5 +730,6 @@ public class ProjectDataController : ControllerBase
         }
 
         await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataSubmitted", new { dataId = record.Id, title = record.Title }, cancellationToken);
+        await _notificationService.BroadcastToAdminsAsync("ProjectDataSubmitted", new { dataId = record.Id, title = record.Title }, cancellationToken);
     }
 }

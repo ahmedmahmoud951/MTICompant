@@ -25,6 +25,7 @@ export interface User {
   lastName: string;
   fullName: string;
   phoneNumber?: string;
+  jobTitle?: string;
   isActive: boolean;
   roles: UserRole[];
   permissions: string[];
@@ -144,6 +145,8 @@ export interface MessageReadState {
   readAt: string;
 }
 
+export type MessageDeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
+
 export interface Message {
   id: string;
   conversationId: string;
@@ -156,6 +159,8 @@ export interface Message {
   attachments: MessageAttachment[];
   reactions: MessageReaction[];
   readStates: MessageReadState[];
+  isDelivered?: boolean;
+  deliveryStatus?: MessageDeliveryStatus;
 }
 
 export interface ConversationMember {
@@ -227,6 +232,7 @@ export interface SystemSafeConfig {
   signalR: {
     enabled: boolean;
     hubPath: string;
+    hubUrl?: string;
     reconnectEnabled: boolean;
   };
 }
@@ -254,4 +260,15 @@ export interface SignalRConfig {
   hubUrl: string;
   reconnectEnabled: boolean;
   allowedOrigins: string[];
+}
+
+export interface NotificationItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  entityType?: string;
+  entityId?: string;
+  isRead: boolean;
+  createdAt: string;
 }
