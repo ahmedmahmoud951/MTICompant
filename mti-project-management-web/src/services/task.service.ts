@@ -6,8 +6,10 @@ export const taskService = {
     const params = new URLSearchParams();
     if (projectId) params.append('projectId', projectId);
     if (siteId) params.append('siteId', siteId);
+    params.append('pageSize', '100');
     const query = params.toString() ? `?${params.toString()}` : '';
     const res = await apiClient.get<any>(`/api/tasks${query}`);
+    if (!res.success) return [];
     if (Array.isArray(res.data)) return res.data;
     if (res.data && Array.isArray(res.data.items)) return res.data.items;
     return [];
@@ -22,7 +24,14 @@ export const taskService = {
     assignedToUserId?: string;
     dueAt?: string;
   }): Promise<TaskItem> {
-    const res = await apiClient.post<TaskItem>('/api/tasks', payload);
+    const res = await apiClient.post<TaskItem>('/api/tasks', {
+      ...payload,
+      description: payload.description || '',
+      assignedToUserId: payload.assignedToUserId || null
+    });
+    if (!res.success || !res.data) {
+      throw new Error(res.message || 'Failed to create task');
+    }
     return res.data;
   },
 
@@ -43,7 +52,14 @@ export const taskService = {
       startAt?: string;
     }
   ): Promise<TaskItem> {
-    const res = await apiClient.put<TaskItem>(`/api/tasks/${taskId}`, payload);
+    const res = await apiClient.put<TaskItem>(`/api/tasks/${taskId}`, {
+      ...payload,
+      description: payload.description || '',
+      assignedToUserId: payload.assignedToUserId || null
+    });
+    if (!res.success || !res.data) {
+      throw new Error(res.message || 'Failed to update task');
+    }
     return res.data;
   },
 

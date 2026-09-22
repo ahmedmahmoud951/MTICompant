@@ -11,6 +11,15 @@ class SignalRService {
     if (typeof window === 'undefined') return null;
 
     try {
+      // Reuse live connection
+      if (this.connection && this.connection.state === signalR.HubConnectionState.Connected) {
+        return this.connection;
+      }
+      if (this.connection) {
+        try { await this.connection.stop(); } catch { /* ignore */ }
+        this.connection = null;
+      }
+
       // 1. Fetch dynamic SignalR configuration from authenticated API endpoint
       const res = await apiClient.get<SignalRConfig>('/api/settings/signalr');
       if (!res.success || !res.data || !res.data.hubEnabled) {

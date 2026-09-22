@@ -120,6 +120,8 @@ export default function Home() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const activeConversationRef = useRef<Conversation | null>(null);
+  const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
+  const chatMessagesContainerRef = useRef<HTMLDivElement | null>(null);
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [newMessageText, setNewMessageText] = useState('');
   const [deliveredMessageIds, setDeliveredMessageIds] = useState<Set<string>>(new Set());
@@ -210,6 +212,7 @@ export default function Home() {
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newClient, setNewClient] = useState('');
+  const [newProjectMemberIds, setNewProjectMemberIds] = useState<string[]>([]);
 
   // Site Form Modal (Admin)
   const [showSiteModal, setShowSiteModal] = useState(false);
@@ -261,6 +264,14 @@ export default function Home() {
   useEffect(() => {
     activeConversationRef.current = activeConversation;
   }, [activeConversation]);
+
+  useEffect(() => {
+    if (activeTab !== 'chat') return;
+    const el = chatMessagesEndRef.current;
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [chatMessages, activeConversation?.id, activeTab]);
 
   useEffect(() => {
     if (showNewChatModal) {
@@ -402,6 +413,7 @@ export default function Home() {
         conn.on('TaskCreated', (taskItem?: any) => {
           addToast(t('toastNewTask'), taskItem?.title || 'Task Created', 'task', 'tasks');
           taskService.getTasks().then(setTasks).catch(() => {});
+          notificationService.getNotifications().then((res) => setNotificationsList(res.items)).catch(() => {});
           const u = authService.getCurrentUser();
           if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
             dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
@@ -415,12 +427,24 @@ export default function Home() {
         conn.on('TaskAssigned', (taskItem?: any) => {
           addToast(t('toastNewTask'), taskItem?.title || 'New Task Assigned', 'task', 'tasks');
           taskService.getTasks().then(setTasks).catch(() => {});
+          notificationService.getNotifications().then((res) => setNotificationsList(res.items)).catch(() => {});
+          loadProjects().catch(() => {});
           const u = authService.getCurrentUser();
           if (u?.roles.includes('Admin') || u?.roles.includes('SystemAdmin')) {
             dashboardService.getAdminStats().then(setAdminStats).catch(() => {});
           } else {
             dashboardService.getEngineerStats().then(setEngineerStats).catch(() => {});
           }
+        });
+        conn.on('ProjectAssigned', (payload?: { name?: string }) => {
+          addToast(
+            lang === 'ar' ? 'تم إسنادك لمشروع' : 'Assigned to project',
+            payload?.name || (lang === 'ar' ? 'مشروع جديد' : 'New project'),
+            'info',
+            'projects'
+          );
+          loadProjects().catch(() => {});
+          notificationService.getNotifications().then((res) => setNotificationsList(res.items)).catch(() => {});
         });
         conn.on('TaskStatusChanged', () => {
           taskService.getTasks().then(setTasks).catch(() => {});
@@ -571,12 +595,15 @@ export default function Home() {
         code: newCode,
         name: newName,
         description: newDesc,
-        clientName: newClient
+        clientName: newClient,
+        memberUserIds: newProjectMemberIds
       };
       if (editingProjectId) {
-        await projectService.updateProject(editingProjectId, payload);
+        const res = await projectService.updateProject(editingProjectId, payload);
+        if (!res.success) throw new Error(res.message || 'Failed to update project');
       } else {
-        await projectService.createProject(payload);
+        const res = await projectService.createProject(payload);
+        if (!res.success) throw new Error(res.message || 'Failed to create project');
       }
       setShowNewProjectModal(false);
       setEditingProjectId(null);
@@ -584,19 +611,29 @@ export default function Home() {
       setNewName('');
       setNewDesc('');
       setNewClient('');
+      setNewProjectMemberIds([]);
       await loadProjects();
     } catch (err: any) {
       alert(err?.message || 'Failed to save project');
     }
   };
 
-  const openEditProject = (proj: Project) => {
+  const openEditProject = async (proj: Project) => {
     setEditingProjectId(proj.id);
     setNewCode(proj.code || '');
     setNewName(proj.name || '');
     setNewDesc(proj.description || '');
     setNewClient(proj.clientName || '');
+    setNewProjectMemberIds([]);
     setShowNewProjectModal(true);
+    try {
+      const res = await projectService.getProjectMembers(proj.id);
+      if (res.success && res.data) {
+        setNewProjectMemberIds(res.data.map((m) => m.userId));
+      }
+    } catch {
+      /* ignore */
+    }
   };
 
   const promptDeleteProject = (proj: Project) => {
@@ -1693,7 +1730,8 @@ export default function Home() {
                                 prev.map((item) => (item.id === n.id ? { ...item, isRead: true } : item))
                               );
                             }
-                            if (n.type === 'NewTask') setActiveTab('tasks');
+                            if (n.type === 'TaskAssigned' || n.type === 'NewTask') setActiveTab('tasks');
+                            if (n.type === 'SystemNotification' || n.entityType === 'Project') setActiveTab('projects');
                             if (n.type === 'DataApproval') setActiveTab('approvals');
                             if (n.type === 'NewMessage') setActiveTab('chat');
                             setShowNotificationsDropdown(false);
@@ -1781,7 +1819,11 @@ export default function Home() {
         )}
 
         {/* Scrollable View Content */}
-        <main className="flex-1 overflow-y-auto p-6 space-y-6">
+        <main
+          className={`flex-1 p-4 sm:p-6 space-y-6 min-h-0 ${
+            activeTab === 'chat' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'
+          }`}
+        >
           {/* Skeleton Loader while content switching */}
           {isLoadingContent ? (
             <div className="space-y-4 animate-pulse">
@@ -1833,78 +1875,172 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Cards / KPI Metrics */}
-                  {isAdmin && adminStats && (
+                  {/* Cards / KPI Metrics — live counts + click to navigate */}
+                  {isAdmin && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('projects')}
+                        className="glow-card glow-card-hover p-4 rounded-2xl text-start w-full cursor-pointer"
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('totalProjects')}</div>
                           <div className="kpi-icon text-cyan-300"><Briefcase className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-100">{adminStats.totalProjects}</div>
-                        <div className="text-[11px] text-emerald-400 mt-1">{adminStats.activeProjects} {t('activeProjects')}</div>
-                      </div>
-                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
+                        <div className="font-display text-2xl font-bold text-slate-100">
+                          {adminStats?.totalProjects ?? projects.length}
+                        </div>
+                        <div className="text-[11px] text-emerald-400 mt-1">
+                          {(adminStats?.activeProjects ??
+                            projects.filter((p) => String(p.status) === 'Active' || Number(p.status) === 1).length)}{' '}
+                          {t('activeProjects')}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('projects')}
+                        className="glow-card glow-card-hover p-4 rounded-2xl text-start w-full cursor-pointer"
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('monitoredSites')}</div>
                           <div className="kpi-icon text-teal-400"><MapPin className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-100">{adminStats.totalSites}</div>
-                        <div className="text-[11px] text-cyan-300 mt-1">{adminStats.totalEngineers} {t('activeEngineers')}</div>
-                      </div>
-                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
+                        <div className="font-display text-2xl font-bold text-slate-100">
+                          {adminStats?.totalSites ??
+                            projects.reduce((sum, p) => sum + (p.totalSitesCount || 0), 0)}
+                        </div>
+                        <div className="text-[11px] text-cyan-300 mt-1">
+                          {(adminStats?.totalEngineers ??
+                            userList.filter((u) =>
+                              (u.roles || []).some((r: string) => r === 'Engineer')
+                            ).length)}{' '}
+                          {t('activeEngineers')}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('approvals')}
+                        className="glow-card glow-card-hover p-4 rounded-2xl text-start w-full cursor-pointer"
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('pendingApprovals')}</div>
                           <div className="kpi-icon text-amber-400"><FileCheck className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-amber-400">{adminStats.pendingApprovals}</div>
-                        <div className="text-[11px] text-slate-400 mt-1">{adminStats.approvedData} {t('approvedRecords')}</div>
-                      </div>
-                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
+                        <div className="font-display text-2xl font-bold text-amber-400">
+                          {adminStats?.pendingApprovals ?? pendingRecords.length}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-1">
+                          {(adminStats?.approvedData ?? approvedRecords.length)} {t('approvedRecords')}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('tasks')}
+                        className="glow-card glow-card-hover p-4 rounded-2xl text-start w-full cursor-pointer"
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('openTasks')}</div>
                           <div className="kpi-icon text-cyan-400"><Activity className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-100">{adminStats.openTasks}</div>
-                        <div className="text-[11px] text-rose-400 mt-1">{adminStats.overdueTasks} {t('overdueLabel')}</div>
-                      </div>
+                        <div className="font-display text-2xl font-bold text-slate-100">
+                          {adminStats?.openTasks ??
+                            tasks.filter(
+                              (tk) => tk.status !== 'Completed' && tk.status !== 'Cancelled'
+                            ).length}
+                        </div>
+                        <div className="text-[11px] text-rose-400 mt-1">
+                          {(adminStats?.overdueTasks ??
+                            tasks.filter(
+                              (tk) =>
+                                !!tk.dueAt &&
+                                new Date(tk.dueAt) < new Date() &&
+                                tk.status !== 'Completed' &&
+                                tk.status !== 'Cancelled'
+                            ).length)}{' '}
+                          {t('overdueLabel')}
+                        </div>
+                      </button>
                     </div>
                   )}
 
-                  {!isAdmin && engineerStats && (
+                  {!isAdmin && (
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('my-projects')}
+                        className="glow-card glow-card-hover p-4 rounded-2xl text-start w-full cursor-pointer"
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('myAssignedProjects')}</div>
                           <div className="kpi-icon text-cyan-300"><FolderKanban className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-100">{engineerStats.myProjectsCount}</div>
-                        <div className="text-[11px] text-cyan-300 mt-1">{engineerStats.mySitesCount} {t('sitesCount')}</div>
-                      </div>
-                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
+                        <div className="font-display text-2xl font-bold text-slate-100">
+                          {engineerStats?.myProjectsCount ?? projects.length}
+                        </div>
+                        <div className="text-[11px] text-cyan-300 mt-1">
+                          {(engineerStats?.mySitesCount ??
+                            projects.reduce((sum, p) => sum + (p.totalSitesCount || 0), 0))}{' '}
+                          {t('sitesCount')}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('my-tasks')}
+                        className="glow-card glow-card-hover p-4 rounded-2xl text-start w-full cursor-pointer"
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('myPendingTasks')}</div>
                           <div className="kpi-icon text-cyan-400"><CheckSquare className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-slate-100">{engineerStats.pendingTasksCount}</div>
-                        <div className="text-[11px] text-emerald-400 mt-1">{engineerStats.completedTasksCount} {t('completedLabel')}</div>
-                      </div>
-                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
+                        <div className="font-display text-2xl font-bold text-slate-100">
+                          {engineerStats?.pendingTasksCount ??
+                            tasks.filter(
+                              (tk) => tk.status === 'ToDo' || tk.status === 'InProgress'
+                            ).length}
+                        </div>
+                        <div className="text-[11px] text-emerald-400 mt-1">
+                          {(engineerStats?.completedTasksCount ??
+                            tasks.filter((tk) => tk.status === 'Completed').length)}{' '}
+                          {t('completedLabel')}
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('my-tasks')}
+                        className="glow-card glow-card-hover p-4 rounded-2xl text-start w-full cursor-pointer"
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('overdueTasks')}</div>
                           <div className="kpi-icon text-rose-400"><AlertCircle className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-rose-400">{engineerStats.overdueTasksCount}</div>
+                        <div className="font-display text-2xl font-bold text-rose-400">
+                          {engineerStats?.overdueTasksCount ??
+                            tasks.filter(
+                              (tk) =>
+                                !!tk.dueAt &&
+                                new Date(tk.dueAt) < new Date() &&
+                                tk.status !== 'Completed' &&
+                                tk.status !== 'Cancelled'
+                            ).length}
+                        </div>
                         <div className="text-[11px] text-slate-400 mt-1">{t('needsAttention')}</div>
-                      </div>
-                      <div className="glow-card glow-card-hover p-4 rounded-2xl">
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('my-data')}
+                        className="glow-card glow-card-hover p-4 rounded-2xl text-start w-full cursor-pointer"
+                      >
                         <div className="flex items-center justify-between mb-2">
                           <div className="text-slate-400 text-xs">{t('approvedRecords')}</div>
                           <div className="kpi-icon text-emerald-400"><FileCheck className="w-4 h-4" /></div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-emerald-400">{engineerStats.approvedDataCount}</div>
-                        <div className="text-[11px] text-amber-400 mt-1">{engineerStats.pendingDataCount} {t('underReview')}</div>
-                      </div>
+                        <div className="font-display text-2xl font-bold text-emerald-400">
+                          {engineerStats?.approvedDataCount ?? approvedRecords.length}
+                        </div>
+                        <div className="text-[11px] text-amber-400 mt-1">
+                          {(engineerStats?.pendingDataCount ?? 0)} {t('underReview')}
+                        </div>
+                      </button>
                     </div>
                   )}
 
@@ -1963,6 +2099,7 @@ export default function Home() {
                             setNewName('');
                             setNewDesc('');
                             setNewClient('');
+                            setNewProjectMemberIds([]);
                             setShowNewProjectModal(true);
                           }}
                           className="p-1.5 rounded-lg bg-mti-600 hover:bg-mti-500 text-white text-xs flex items-center gap-1 font-semibold"
@@ -2432,10 +2569,10 @@ export default function Home() {
               {/* ======================================================== */}
               {/* VIEW: CHAT & WHATSAPP MESSAGE STATUSES */}
               {activeTab === 'chat' && (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-0 h-[720px] rounded-2xl border-2 border-cyan-400/25 overflow-hidden shadow-xl bg-[#0f1c30]">
-                  {/* Conversations list (by name) */}
-                  <div className="md:col-span-1 border-e-2 border-slate-500/40 flex flex-col bg-[#132238]">
-                    <div className="p-3.5 border-b-2 border-cyan-400/20 space-y-3 bg-[#15294a]">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-0 flex-1 min-h-0 h-full max-h-[calc(100dvh-10.5rem)] rounded-2xl border-2 border-cyan-400/25 overflow-hidden shadow-xl bg-[#0f1c30]">
+                  {/* Conversations list (by name) — scrollable */}
+                  <div className="md:col-span-1 border-e-2 border-slate-500/40 flex flex-col min-h-0 h-full overflow-hidden bg-[#132238]">
+                    <div className="flex-shrink-0 p-3.5 border-b-2 border-cyan-400/20 space-y-3 bg-[#15294a]">
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <h3 className="font-bold text-slate-100 text-sm flex items-center gap-1.5">
@@ -2468,7 +2605,7 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-2 space-y-1.5">
                       {filteredConversations.length === 0 ? (
                         <div className="p-6 text-center text-xs text-slate-200 space-y-3">
                           <MessageSquare className="w-9 h-9 text-slate-300 mx-auto opacity-70" />
@@ -2596,11 +2733,11 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Message stream */}
-                  <div className="md:col-span-2 flex flex-col bg-[#15253c]">
+                  {/* Message stream — scroll messages, pin composer */}
+                  <div className="md:col-span-2 flex flex-col min-h-0 h-full overflow-hidden bg-[#15253c]">
                     {activeConversation ? (
                       <>
-                        <div className="p-3.5 border-b-2 border-cyan-400/20 flex items-center justify-between bg-[#15294a]">
+                        <div className="flex-shrink-0 p-3.5 border-b-2 border-cyan-400/20 flex items-center justify-between bg-[#15294a]">
                           <div className="flex items-center gap-3">
                             <div className="relative">
                               <div className="w-11 h-11 rounded-full bg-cyan-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
@@ -2652,9 +2789,12 @@ export default function Home() {
                           </button>
                         </div>
 
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#112033]">
+                        <div
+                          ref={chatMessagesContainerRef}
+                          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-3 bg-[#112033]"
+                        >
                           {chatMessages.length === 0 && (
-                            <div className="h-full min-h-[200px] flex items-center justify-center text-xs text-slate-300">
+                            <div className="h-full min-h-[120px] flex items-center justify-center text-xs text-slate-300">
                               {lang === 'ar'
                                 ? 'ابدأ الكتابة في الحقل بالأسفل…'
                                 : 'Start typing in the box below…'}
@@ -2734,11 +2874,12 @@ export default function Home() {
                               </div>
                             );
                           })}
+                          <div ref={chatMessagesEndRef} className="h-px w-full" />
                         </div>
 
                         <form
                           onSubmit={handleSendMessage}
-                          className="p-3 border-t-2 border-slate-500/40 flex items-center gap-2 bg-[#15294a]"
+                          className="flex-shrink-0 p-3 border-t-2 border-slate-500/40 flex items-center gap-2 bg-[#15294a] sticky bottom-0 z-10"
                         >
                           <input
                             type="text"
@@ -3193,12 +3334,60 @@ export default function Home() {
                 />
               </div>
 
+              {isAdmin && (
+                <div>
+                  <label className="block text-xs text-slate-200 mb-1">
+                    {lang === 'ar' ? 'إسناد مستخدمين للمشروع' : 'Assign users to project'}
+                  </label>
+                  <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-500/40 bg-slate-800/70 p-2 space-y-1">
+                    {userList.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 px-1 py-2">
+                        {lang === 'ar' ? 'لا يوجد مستخدمون' : 'No users loaded'}
+                      </p>
+                    ) : (
+                      userList.map((u) => {
+                        const checked = newProjectMemberIds.includes(u.id);
+                        return (
+                          <label
+                            key={u.id}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-700/50 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => {
+                                setNewProjectMemberIds((prev) =>
+                                  checked ? prev.filter((id) => id !== u.id) : [...prev, u.id]
+                                );
+                              }}
+                              className="rounded border-slate-500"
+                            />
+                            <span className="text-sm text-slate-100">
+                              {u.firstName} {u.lastName}
+                            </span>
+                            <span className="text-[10px] text-slate-400 ml-auto">{u.email}</span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                  {newProjectMemberIds.length > 0 && (
+                    <p className="text-[11px] text-cyan-300 mt-1">
+                      {lang === 'ar'
+                        ? `${newProjectMemberIds.length} مستخدم محدد`
+                        : `${newProjectMemberIds.length} user(s) selected`}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
                   onClick={() => {
                     setShowNewProjectModal(false);
                     setEditingProjectId(null);
+                    setNewProjectMemberIds([]);
                   }}
                   className="px-4 py-2 rounded-xl bg-slate-700 text-white text-sm"
                 >
@@ -3337,7 +3526,7 @@ export default function Home() {
                 </select>
               </div>
 
-              {isAdmin && userList.length > 0 && (
+              {isAdmin && (
                 <div>
                   <label className="block text-xs text-slate-200 mb-1">
                     {lang === 'ar' ? 'تعيين لمستخدم' : 'Assign to'}
@@ -3345,15 +3534,23 @@ export default function Home() {
                   <select
                     value={newTaskAssigneeId}
                     onChange={(e) => setNewTaskAssigneeId(e.target.value)}
+                    required={!editingTaskId}
                     className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                   >
-                    <option value="">{lang === 'ar' ? 'بدون تعيين' : 'Unassigned'}</option>
+                    <option value="">
+                      {lang === 'ar' ? 'اختر مستخدماً...' : 'Select a user...'}
+                    </option>
                     {userList.map((u) => (
                       <option key={u.id} value={u.id}>
-                        {u.firstName} {u.lastName}
+                        {u.firstName} {u.lastName} ({u.email})
                       </option>
                     ))}
                   </select>
+                  {userList.length === 0 && (
+                    <p className="text-[11px] text-amber-300 mt-1">
+                      {lang === 'ar' ? 'جاري تحميل المستخدمين...' : 'Loading users...'}
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -3555,7 +3752,7 @@ export default function Home() {
               />
             </div>
 
-            <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
+            <div className="max-h-[min(20rem,50vh)] overflow-y-auto overscroll-contain space-y-2 pr-1">
               {loadingContacts ? (
                 <div className="py-8 text-center text-sm text-slate-200 flex items-center justify-center gap-2">
                   <RefreshCw className="w-4 h-4 animate-spin text-cyan-300" />

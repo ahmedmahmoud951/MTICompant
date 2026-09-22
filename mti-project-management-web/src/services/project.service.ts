@@ -9,6 +9,7 @@ export interface CreateProjectPayload {
   startDate?: string;
   endDate?: string;
   status?: string;
+  memberUserIds?: string[];
 }
 
 export interface CreateSitePayload {
@@ -19,6 +20,16 @@ export interface CreateSitePayload {
   latitude?: number;
   longitude?: number;
   status?: string;
+}
+
+export interface ProjectMember {
+  id: string;
+  projectId: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  role: string;
+  joinedAt: string;
 }
 
 export const projectService = {
@@ -55,6 +66,18 @@ export const projectService = {
 
   async createSite(projectId: string, payload: CreateSitePayload): Promise<ApiResponse<Site>> {
     return apiClient.post(`/api/projects/${projectId}/sites`, payload);
+  },
+
+  async getProjectMembers(projectId: string): Promise<ApiResponse<ProjectMember[]>> {
+    return apiClient.get(`/api/projects/${projectId}/members`);
+  },
+
+  async assignProjectMember(projectId: string, userId: string, role = 'Engineer'): Promise<ApiResponse<ProjectMember>> {
+    return apiClient.post(`/api/projects/${projectId}/members`, { userId, role });
+  },
+
+  async removeProjectMember(projectId: string, userId: string): Promise<ApiResponse<boolean>> {
+    return apiClient.delete(`/api/projects/${projectId}/members/${userId}`);
   },
 };
 
