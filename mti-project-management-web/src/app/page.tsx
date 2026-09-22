@@ -618,9 +618,9 @@ export default function Home() {
   const promptApprove = (record: ProjectDataRecord) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Approve Submission',
+      title: t('approve'),
       message: `Are you sure you want to approve "${record.title}" from ${record.submitterName}? Once approved, this record becomes permanent and immutable.`,
-      confirmText: 'Approve Record',
+      confirmText: t('approve'),
       confirmColor: 'bg-emerald-600 hover:bg-emerald-500',
       onConfirm: async () => {
         await dataRecordService.approve(record.id, approvalComment);
@@ -635,9 +635,9 @@ export default function Home() {
   const promptReject = (record: ProjectDataRecord) => {
     setConfirmDialog({
       isOpen: true,
-      title: 'Reject Submission',
+      title: t('reject'),
       message: `Are you sure you want to reject "${record.title}"? Please provide a clear audit reason.`,
-      confirmText: 'Reject Record',
+      confirmText: t('reject'),
       confirmColor: 'bg-rose-600 hover:bg-rose-500',
       onConfirm: async () => {
         if (!approvalComment.trim()) {
@@ -656,9 +656,9 @@ export default function Home() {
   const promptRequestChanges = (record: ProjectDataRecord) => {
     setConfirmDialog({
       isOpen: true,
-      title: '{t('requestChanges')}',
+      title: t('requestChanges'),
       message: `Return "${record.title}" back to ${record.submitterName} with modification instructions.`,
-      confirmText: '{t('requestChanges')}',
+      confirmText: t('requestChanges'),
       confirmColor: 'bg-amber-600 hover:bg-amber-500',
       onConfirm: async () => {
         if (!approvalComment.trim()) {
