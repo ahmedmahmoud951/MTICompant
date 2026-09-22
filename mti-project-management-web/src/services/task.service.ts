@@ -29,5 +29,26 @@ export const taskService = {
   async updateStatus(taskId: string, status: string, notes?: string): Promise<boolean> {
     const res = await apiClient.put(`/api/tasks/${taskId}/status`, { status, notes });
     return res.success;
+  },
+
+  async updateTask(
+    taskId: string,
+    payload: {
+      title: string;
+      description?: string;
+      priority: string;
+      assignedToUserId?: string;
+      dueAt?: string;
+      status?: string;
+      startAt?: string;
+    }
+  ): Promise<TaskItem> {
+    const res = await apiClient.put<TaskItem>(`/api/tasks/${taskId}`, payload);
+    return res.data;
+  },
+
+  async deleteTask(taskId: string): Promise<boolean> {
+    const res = await apiClient.delete(`/api/tasks/${taskId}`);
+    return res.success;
   }
 };

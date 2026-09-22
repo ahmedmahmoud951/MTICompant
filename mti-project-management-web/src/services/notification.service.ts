@@ -16,12 +16,21 @@ export const notificationService = {
   },
 
   async markAsRead(id: string): Promise<boolean> {
-    const res = await apiClient.post(`/api/notifications/${id}/read`, {});
-    return res.success;
+    try {
+      const res = await apiClient.post(`/api/notifications/${id}/read`, {});
+      return res.success;
+    } catch {
+      // Notification may already be gone or not owned by this user
+      return false;
+    }
   },
 
   async markAllAsRead(): Promise<boolean> {
-    const res = await apiClient.post('/api/notifications/read-all', {});
-    return res.success;
+    try {
+      const res = await apiClient.post('/api/notifications/read-all', {});
+      return res.success;
+    } catch {
+      return false;
+    }
   }
 };

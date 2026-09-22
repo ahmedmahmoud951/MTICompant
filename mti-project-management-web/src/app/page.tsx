@@ -66,7 +66,9 @@ import {
   Check,
   CheckCheck,
   Clock,
-  MessageCircle
+  MessageCircle,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import { Language, getTranslation, TranslationKey } from '@/lib/i18n';
 import { API_BASE_URL } from '@/lib/api-client';
@@ -203,10 +205,26 @@ export default function Home() {
 
   // New Project Form Modal
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [newCode, setNewCode] = useState('');
   const [newName, setNewName] = useState('');
   const [newDesc, setNewDesc] = useState('');
   const [newClient, setNewClient] = useState('');
+
+  // Site Form Modal (Admin)
+  const [showSiteModal, setShowSiteModal] = useState(false);
+  const [editingSiteId, setEditingSiteId] = useState<string | null>(null);
+  const [siteCode, setSiteCode] = useState('');
+  const [siteName, setSiteName] = useState('');
+  const [siteDesc, setSiteDesc] = useState('');
+  const [siteAddress, setSiteAddress] = useState('');
+
+  // Edit mode for users/tasks
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingUserActive, setEditingUserActive] = useState(true);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [newTaskAssigneeId, setNewTaskAssigneeId] = useState('');
+  const [newTaskDesc, setNewTaskDesc] = useState('');
 
   // Enterprise Drawer (Side inspection panel)
   const [drawerData, setDrawerData] = useState<{ title: string; type: string; details: any } | null>(null);
@@ -549,21 +567,121 @@ export default function Home() {
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await projectService.createProject({
+      const payload = {
         code: newCode,
         name: newName,
         description: newDesc,
         clientName: newClient
-      });
+      };
+      if (editingProjectId) {
+        await projectService.updateProject(editingProjectId, payload);
+      } else {
+        await projectService.createProject(payload);
+      }
       setShowNewProjectModal(false);
+      setEditingProjectId(null);
       setNewCode('');
       setNewName('');
       setNewDesc('');
       setNewClient('');
       await loadProjects();
     } catch (err: any) {
-      alert(err?.message || 'Failed to create project');
+      alert(err?.message || 'Failed to save project');
     }
+  };
+
+  const openEditProject = (proj: Project) => {
+    setEditingProjectId(proj.id);
+    setNewCode(proj.code || '');
+    setNewName(proj.name || '');
+    setNewDesc(proj.description || '');
+    setNewClient(proj.clientName || '');
+    setShowNewProjectModal(true);
+  };
+
+  const promptDeleteProject = (proj: Project) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'ar' ? 'حذف المشروع' : 'Delete Project',
+      message:
+        lang === 'ar'
+          ? `هل تريد حذف المشروع "${proj.name}" نهائياً؟`
+          : `Delete project "${proj.name}" permanently?`,
+      confirmText: lang === 'ar' ? 'حذف' : 'Delete',
+      confirmColor: 'bg-rose-600 hover:bg-rose-500',
+      onConfirm: async () => {
+        await projectService.deleteProject(proj.id);
+        if (selectedProjectId === proj.id) {
+          setSelectedProjectId(null);
+          setSelectedProjectSites([]);
+        }
+        await loadProjects();
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  const openCreateSite = () => {
+    if (!selectedProjectId) {
+      alert(lang === 'ar' ? 'اختر مشروعاً أولاً' : 'Select a project first');
+      return;
+    }
+    setEditingSiteId(null);
+    setSiteCode('');
+    setSiteName('');
+    setSiteDesc('');
+    setSiteAddress('');
+    setShowSiteModal(true);
+  };
+
+  const openEditSite = (site: Site) => {
+    setEditingSiteId(site.id);
+    setSiteCode(site.code || '');
+    setSiteName(site.name || '');
+    setSiteDesc(site.description || '');
+    setSiteAddress(site.address || '');
+    setShowSiteModal(true);
+  };
+
+  const handleSaveSite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProjectId) return;
+    try {
+      const payload = {
+        code: siteCode,
+        name: siteName,
+        description: siteDesc,
+        address: siteAddress
+      };
+      if (editingSiteId) {
+        await siteService.updateSite(editingSiteId, payload);
+      } else {
+        await projectService.createSite(selectedProjectId, payload);
+      }
+      setShowSiteModal(false);
+      setEditingSiteId(null);
+      await selectProject(selectedProjectId);
+    } catch (err: any) {
+      alert(err?.message || 'Failed to save site');
+    }
+  };
+
+  const promptDeleteSite = (site: Site) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'ar' ? 'حذف الموقع' : 'Delete Site',
+      message:
+        lang === 'ar'
+          ? `هل تريد حذف الموقع "${site.name}"؟`
+          : `Delete site "${site.name}"?`,
+      confirmText: lang === 'ar' ? 'حذف' : 'Delete',
+      confirmColor: 'bg-rose-600 hover:bg-rose-500',
+      onConfirm: async () => {
+        await siteService.deleteSite(site.id);
+        if (selectedProjectId) await selectProject(selectedProjectId);
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // Chat Actions
@@ -575,6 +693,11 @@ export default function Home() {
     }
     if (conv.title?.trim()) return conv.title.trim();
     return lang === 'ar' ? 'محادثة مباشرة' : 'Direct Chat';
+  };
+
+  const getOtherMember = (conv: Conversation) => {
+    if (conv.isGroup) return null;
+    return conv.members?.find((m) => m.userId !== currentUser?.id) || null;
   };
 
   const syncPresenceFromConversations = (convs: Conversation[]) => {
@@ -816,24 +939,68 @@ export default function Home() {
   // Task Center Actions
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProjectId) {
-      alert('Please select a project first.');
+    if (!selectedProjectId && !editingTaskId) {
+      alert(lang === 'ar' ? 'اختر مشروعاً أولاً' : 'Please select a project first.');
       return;
     }
     try {
-      await taskService.createTask({
-        projectId: selectedProjectId,
-        siteId: selectedProjectSites[0]?.id,
-        title: newTaskTitle,
-        priority: newTaskPriority
-      });
+      if (editingTaskId) {
+        const existing = tasks.find((tk) => tk.id === editingTaskId);
+        await taskService.updateTask(editingTaskId, {
+          title: newTaskTitle,
+          description: newTaskDesc || '',
+          priority: newTaskPriority,
+          assignedToUserId: newTaskAssigneeId || undefined,
+          status: existing?.status
+        });
+      } else {
+        await taskService.createTask({
+          projectId: selectedProjectId!,
+          siteId: selectedProjectSites[0]?.id,
+          title: newTaskTitle,
+          description: newTaskDesc || undefined,
+          priority: newTaskPriority,
+          assignedToUserId: newTaskAssigneeId || undefined
+        });
+      }
       setNewTaskTitle('');
+      setNewTaskDesc('');
+      setNewTaskAssigneeId('');
+      setEditingTaskId(null);
       setShowNewTaskModal(false);
       const updated = await taskService.getTasks();
       setTasks(updated);
     } catch (err: any) {
-      alert(err?.message || 'Failed to create task');
+      alert(err?.message || 'Failed to save task');
     }
+  };
+
+  const openEditTask = (task: TaskItem) => {
+    setEditingTaskId(task.id);
+    setNewTaskTitle(task.title || '');
+    setNewTaskDesc((task as any).description || '');
+    setNewTaskPriority(task.priority || 'Medium');
+    setNewTaskAssigneeId(task.assignedToUserId || '');
+    setShowNewTaskModal(true);
+  };
+
+  const promptDeleteTask = (task: TaskItem) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'ar' ? 'حذف المهمة' : 'Delete Task',
+      message:
+        lang === 'ar'
+          ? `هل تريد حذف المهمة "${task.title}"؟`
+          : `Delete task "${task.title}"?`,
+      confirmText: lang === 'ar' ? 'حذف' : 'Delete',
+      confirmColor: 'bg-rose-600 hover:bg-rose-500',
+      onConfirm: async () => {
+        await taskService.deleteTask(task.id);
+        const updated = await taskService.getTasks();
+        setTasks(updated);
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   const handleTaskStatusChange = async (taskId: string, newStatus: string) => {
@@ -849,29 +1016,74 @@ export default function Home() {
   // User Management Actions
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    const wasEdit = !!editingUserId;
     try {
-      await dashboardService.createUser({
-        firstName: newFirstName,
-        lastName: newLastName,
-        email: newUserEmail,
-        password: newUserPassword,
-        role: newUserRole,
-        jobTitle: newUserJobTitle.trim() || undefined
-      });
+      if (editingUserId) {
+        await dashboardService.updateUser(editingUserId, {
+          firstName: newFirstName,
+          lastName: newLastName,
+          jobTitle: newUserJobTitle.trim() || undefined,
+          isActive: editingUserActive,
+          roles: [newUserRole]
+        });
+      } else {
+        await dashboardService.createUser({
+          firstName: newFirstName,
+          lastName: newLastName,
+          email: newUserEmail,
+          password: newUserPassword,
+          role: newUserRole,
+          jobTitle: newUserJobTitle.trim() || undefined
+        });
+      }
       setShowNewUserModal(false);
+      setEditingUserId(null);
       setNewFirstName('');
       setNewLastName('');
       setNewUserEmail('');
       setNewUserPassword('');
       setNewUserJobTitle('');
+      setNewUserRole('Engineer');
+      setEditingUserActive(true);
       const users = await dashboardService.getUsers();
       setUserList(users);
-      logger.info('User provisioned', { email: newUserEmail, jobTitle: newUserJobTitle });
-      alert(t('userCreatedSuccess'));
+      logger.info(wasEdit ? 'User updated' : 'User provisioned', { email: newUserEmail });
+      alert(wasEdit ? (lang === 'ar' ? 'تم تحديث المستخدم' : 'User updated') : t('userCreatedSuccess'));
     } catch (err: any) {
-      logger.error('Failed to create user', err);
-      alert(err?.message || 'Failed to create user');
+      logger.error('Failed to save user', err);
+      alert(err?.message || 'Failed to save user');
     }
+  };
+
+  const openEditUser = (u: any) => {
+    setEditingUserId(u.id);
+    setNewFirstName(u.firstName || '');
+    setNewLastName(u.lastName || '');
+    setNewUserEmail(u.email || '');
+    setNewUserJobTitle(u.jobTitle || '');
+    setNewUserRole(u.roles?.[0] || 'Engineer');
+    setEditingUserActive(u.isActive !== false);
+    setNewUserPassword('');
+    setShowNewUserModal(true);
+  };
+
+  const promptDeleteDataRecord = (record: ProjectDataRecord) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: lang === 'ar' ? 'حذف السجل' : 'Delete Record',
+      message:
+        lang === 'ar'
+          ? `هل تريد حذف السجل "${record.title}"؟`
+          : `Delete record "${record.title}"?`,
+      confirmText: lang === 'ar' ? 'حذف' : 'Delete',
+      confirmColor: 'bg-rose-600 hover:bg-rose-500',
+      onConfirm: async () => {
+        await dataRecordService.deleteRecord(record.id);
+        const updated = await dataRecordService.getPendingApprovals();
+        setPendingRecords(updated);
+        setConfirmDialog((prev) => ({ ...prev, isOpen: false }));
+      }
+    });
   };
 
   // Global Search
@@ -1745,7 +1957,14 @@ export default function Home() {
                       <h3 className="text-sm font-bold text-slate-100">{t('projectsRoster')}</h3>
                       {isAdmin && (
                         <button
-                          onClick={() => setShowNewProjectModal(true)}
+                          onClick={() => {
+                            setEditingProjectId(null);
+                            setNewCode('');
+                            setNewName('');
+                            setNewDesc('');
+                            setNewClient('');
+                            setShowNewProjectModal(true);
+                          }}
                           className="p-1.5 rounded-lg bg-mti-600 hover:bg-mti-500 text-white text-xs flex items-center gap-1 font-semibold"
                         >
                           <Plus className="w-3.5 h-3.5" />
@@ -1775,13 +1994,45 @@ export default function Home() {
                           </div>
                           <div className="font-semibold text-slate-100 text-sm mt-1">{proj.name}</div>
                           <div className="text-xs text-slate-400 mt-0.5">{proj.clientName}</div>
+                          {isAdmin && (
+                            <div className="mt-2 pt-2 border-t border-slate-600/40 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => openEditProject(proj)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-500/20 text-cyan-200 text-[11px] font-semibold hover:bg-cyan-500/30"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                {lang === 'ar' ? 'تعديل' : 'Edit'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => promptDeleteProject(proj)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-[11px] font-semibold hover:bg-rose-500/30"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                {lang === 'ar' ? 'حذف' : 'Delete'}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
 
                   <div className="lg:col-span-2 glow-card p-4 rounded-2xl space-y-4">
-                    <h3 className="text-sm font-bold text-slate-100">{t('sitesUnderProject')}</h3>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold text-slate-100">{t('sitesUnderProject')}</h3>
+                      {isAdmin && selectedProjectId && (
+                        <button
+                          type="button"
+                          onClick={openCreateSite}
+                          className="px-2.5 py-1.5 rounded-lg bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold flex items-center gap-1"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          {lang === 'ar' ? 'إضافة موقع' : 'Add Site'}
+                        </button>
+                      )}
+                    </div>
                     {loadingSites ? (
                       <div className="p-8 text-center text-xs text-slate-500">{t('loading')}</div>
                     ) : selectedProjectSites.length === 0 ? (
@@ -1812,7 +2063,7 @@ export default function Home() {
                                   {site.assignments.map((a) => (
                                     <div
                                       key={a.id}
-                                      className="flex items-center justify-between text-slate-300 bg-slate-800/55/80 px-2 py-1 rounded-md border border-slate-600/50"
+                                      className="flex items-center justify-between text-slate-300 bg-slate-800/80 px-2 py-1 rounded-md border border-slate-600/50"
                                     >
                                       <span>{a.engineerName}</span>
                                       <span className="text-[10px] text-cyan-300 font-medium">{a.role}</span>
@@ -1823,6 +2074,27 @@ export default function Home() {
                                 <div className="text-slate-500 italic">{t('noEngineersAssigned')}</div>
                               )}
                             </div>
+
+                            {isAdmin && (
+                              <div className="pt-2 flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditSite(site)}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-500/20 text-cyan-200 text-[11px] font-semibold"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  {lang === 'ar' ? 'تعديل' : 'Edit'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => promptDeleteSite(site)}
+                                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-[11px] font-semibold"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  {lang === 'ar' ? 'حذف' : 'Delete'}
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -1892,6 +2164,13 @@ export default function Home() {
                             />
 
                             <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => promptDeleteDataRecord(r)}
+                                className="px-3 py-1.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-rose-300 text-xs font-semibold flex items-center gap-1"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                {lang === 'ar' ? 'حذف' : 'Delete'}
+                              </button>
                               <button
                                 onClick={() => promptRequestChanges(r)}
                                 className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold"
@@ -2066,7 +2345,14 @@ export default function Home() {
 
                     {isAdmin && (
                       <button
-                        onClick={() => setShowNewTaskModal(true)}
+                        onClick={() => {
+                          setEditingTaskId(null);
+                          setNewTaskTitle('');
+                          setNewTaskDesc('');
+                          setNewTaskAssigneeId('');
+                          setNewTaskPriority('Medium');
+                          setShowNewTaskModal(true);
+                        }}
                         className="px-3 py-1.5 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold flex items-center gap-1.5"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -2114,6 +2400,27 @@ export default function Home() {
                             <option value="Completed">Completed</option>
                           </select>
                         </div>
+
+                        {isAdmin && (
+                          <div className="pt-1 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditTask(task)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-500/20 text-cyan-200 text-[11px] font-semibold"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              {lang === 'ar' ? 'تعديل' : 'Edit'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => promptDeleteTask(task)}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-[11px] font-semibold"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              {lang === 'ar' ? 'حذف' : 'Delete'}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2488,7 +2795,17 @@ export default function Home() {
                       </div>
 
                       <button
-                        onClick={() => setShowNewUserModal(true)}
+                        onClick={() => {
+                          setEditingUserId(null);
+                          setNewFirstName('');
+                          setNewLastName('');
+                          setNewUserEmail('');
+                          setNewUserPassword('');
+                          setNewUserJobTitle('');
+                          setNewUserRole('Engineer');
+                          setEditingUserActive(true);
+                          setShowNewUserModal(true);
+                        }}
                         className="px-3 py-1.5 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -2530,6 +2847,12 @@ export default function Home() {
                               </td>
                               <td className="p-3 text-end space-x-2 rtl:space-x-reverse">
                                 <button
+                                  onClick={() => openEditUser(u)}
+                                  className="text-[11px] text-cyan-300 hover:underline font-semibold"
+                                >
+                                  {lang === 'ar' ? 'تعديل' : 'Edit'}
+                                </button>
+                                <button
                                   onClick={async () => {
                                     const newPass = prompt(lang === 'ar' ? 'أدخل كلمة المرور الجديدة للمستخدم:' : 'Enter new password for user:');
                                     if (newPass) {
@@ -2543,7 +2866,7 @@ export default function Home() {
                                 </button>
                                 <button
                                   onClick={async () => {
-                                    if (confirm(lang === 'ar' ? `هل أنت متأكد من تعطيل حساب ${u.email}؟` : `Deactivate ${u.email}?`)) {
+                                    if (confirm(lang === 'ar' ? `هل أنت متأكد من تعطيل/حذف حساب ${u.email}؟` : `Deactivate/delete ${u.email}?`)) {
                                       await dashboardService.deleteUser(u.id);
                                       const updated = await dashboardService.getUsers();
                                       setUserList(updated);
@@ -2551,7 +2874,7 @@ export default function Home() {
                                   }}
                                   className="text-[11px] text-rose-400 hover:underline"
                                 >
-                                  {t('actionDeactivate')}
+                                  {lang === 'ar' ? 'حذف' : 'Delete'}
                                 </button>
                               </td>
                             </tr>
@@ -2813,70 +3136,83 @@ export default function Home() {
         </div>
       )}
 
-      {/* 5. NEW PROJECT MODAL */}
+      {/* 5. NEW / EDIT PROJECT MODAL */}
       {showNewProjectModal && (
         <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl">
-            <h3 className="text-base font-bold text-slate-100 mb-4">{t('createProject')}</h3>
+            <h3 className="text-base font-bold text-white mb-4">
+              {editingProjectId
+                ? lang === 'ar'
+                  ? 'تعديل المشروع'
+                  : 'Edit Project'
+                : t('createProject')}
+            </h3>
             <form onSubmit={handleCreateProject} className="space-y-4">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('projectCode')}</label>
+                <label className="block text-xs text-slate-200 mb-1">{t('projectCode')}</label>
                 <input
                   type="text"
                   value={newCode}
                   onChange={(e) => setNewCode(e.target.value)}
                   placeholder="PRJ-2026-ALEX"
                   required
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('projectName')}</label>
+                <label className="block text-xs text-slate-200 mb-1">{t('projectName')}</label>
                 <input
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Alexandria Port Hub"
                   required
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('clientName')}</label>
+                <label className="block text-xs text-slate-200 mb-1">{t('clientName')}</label>
                 <input
                   type="text"
                   value={newClient}
                   onChange={(e) => setNewClient(e.target.value)}
                   placeholder="Port Authority"
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('description')}</label>
+                <label className="block text-xs text-slate-200 mb-1">{t('description')}</label>
                 <textarea
                   value={newDesc}
                   onChange={(e) => setNewDesc(e.target.value)}
                   rows={2}
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowNewProjectModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800/70 text-slate-300 text-xs"
+                  onClick={() => {
+                    setShowNewProjectModal(false);
+                    setEditingProjectId(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-700 text-white text-sm"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-mti-600 text-white text-xs font-semibold"
+                  className="px-4 py-2 rounded-xl bg-mti-600 text-white text-sm font-semibold"
                 >
-                  {t('createProject')}
+                  {editingProjectId
+                    ? lang === 'ar'
+                      ? 'حفظ التعديل'
+                      : 'Save Changes'
+                    : t('createProject')}
                 </button>
               </div>
             </form>
@@ -2884,30 +3220,115 @@ export default function Home() {
         </div>
       )}
 
-      {/* 6. NEW TASK MODAL */}
+      {/* 5b. SITE CREATE / EDIT MODAL */}
+      {showSiteModal && (
+        <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl">
+            <h3 className="text-base font-bold text-white mb-4">
+              {editingSiteId
+                ? lang === 'ar'
+                  ? 'تعديل الموقع'
+                  : 'Edit Site'
+                : lang === 'ar'
+                  ? 'إضافة موقع'
+                  : 'Add Site'}
+            </h3>
+            <form onSubmit={handleSaveSite} className="space-y-4">
+              <div>
+                <label className="block text-xs text-slate-200 mb-1">{lang === 'ar' ? 'كود الموقع' : 'Site Code'}</label>
+                <input
+                  type="text"
+                  value={siteCode}
+                  onChange={(e) => setSiteCode(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-200 mb-1">{lang === 'ar' ? 'اسم الموقع' : 'Site Name'}</label>
+                <input
+                  type="text"
+                  value={siteName}
+                  onChange={(e) => setSiteName(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-200 mb-1">{lang === 'ar' ? 'العنوان' : 'Address'}</label>
+                <input
+                  type="text"
+                  value={siteAddress}
+                  onChange={(e) => setSiteAddress(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-200 mb-1">{t('description')}</label>
+                <textarea
+                  value={siteDesc}
+                  onChange={(e) => setSiteDesc(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSiteModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-700 text-white text-sm"
+                >
+                  {t('cancel')}
+                </button>
+                <button type="submit" className="px-4 py-2 rounded-xl bg-mti-600 text-white text-sm font-semibold">
+                  {lang === 'ar' ? 'حفظ' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 6. NEW / EDIT TASK MODAL */}
       {showNewTaskModal && (
         <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl">
-            <h3 className="text-base font-bold text-slate-100 mb-4">{t('createTask')}</h3>
+            <h3 className="text-base font-bold text-white mb-4">
+              {editingTaskId
+                ? lang === 'ar'
+                  ? 'تعديل المهمة'
+                  : 'Edit Task'
+                : t('createTask')}
+            </h3>
             <form onSubmit={handleCreateTask} className="space-y-4">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('taskTitle')}</label>
+                <label className="block text-xs text-slate-200 mb-1">{t('taskTitle')}</label>
                 <input
                   type="text"
                   value={newTaskTitle}
                   onChange={(e) => setNewTaskTitle(e.target.value)}
                   placeholder="Excavate foundation row B"
                   required
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('priority')}</label>
+                <label className="block text-xs text-slate-200 mb-1">{t('description')}</label>
+                <textarea
+                  value={newTaskDesc}
+                  onChange={(e) => setNewTaskDesc(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-200 mb-1">{t('priority')}</label>
                 <select
                   value={newTaskPriority}
                   onChange={(e) => setNewTaskPriority(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 >
                   <option value="Low">{t('priorityLow')}</option>
                   <option value="Medium">{t('priorityMedium')}</option>
@@ -2916,19 +3337,46 @@ export default function Home() {
                 </select>
               </div>
 
+              {isAdmin && userList.length > 0 && (
+                <div>
+                  <label className="block text-xs text-slate-200 mb-1">
+                    {lang === 'ar' ? 'تعيين لمستخدم' : 'Assign to'}
+                  </label>
+                  <select
+                    value={newTaskAssigneeId}
+                    onChange={(e) => setNewTaskAssigneeId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                  >
+                    <option value="">{lang === 'ar' ? 'بدون تعيين' : 'Unassigned'}</option>
+                    {userList.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.firstName} {u.lastName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowNewTaskModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800/70 text-slate-300 text-xs"
+                  onClick={() => {
+                    setShowNewTaskModal(false);
+                    setEditingTaskId(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-700 text-white text-sm"
                 >
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-mti-600 text-white text-xs font-semibold"
+                  className="px-4 py-2 rounded-xl bg-mti-600 text-white text-sm font-semibold"
                 >
-                  {t('createTask')}
+                  {editingTaskId
+                    ? lang === 'ar'
+                      ? 'حفظ'
+                      : 'Save'
+                    : t('createTask')}
                 </button>
               </div>
             </form>
@@ -2941,7 +3389,13 @@ export default function Home() {
         <div className="fixed inset-0 z-50 bg-black/55 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-600/50 shadow-xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-slate-100">{t('createCorporateUser')}</h3>
+              <h3 className="text-base font-bold text-white">
+                {editingUserId
+                  ? lang === 'ar'
+                    ? 'تعديل المستخدم'
+                    : 'Edit User'
+                  : t('createCorporateUser')}
+              </h3>
               <button
                 type="button"
                 onClick={() => setShowNewUserModal(false)}
@@ -2986,35 +3440,39 @@ export default function Home() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('corporateEmail')}</label>
-                <input
-                  type="email"
-                  value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)}
-                  placeholder="field.engineer@mti.com"
-                  required
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
-                />
-              </div>
+              {!editingUserId && (
+                <>
+                  <div>
+                    <label className="block text-xs text-slate-200 mb-1">{t('corporateEmail')}</label>
+                    <input
+                      type="email"
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      placeholder="field.engineer@mti.com"
+                      required
+                      className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-200 mb-1">{t('initialPassword')}</label>
+                    <input
+                      type="password"
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                    />
+                  </div>
+                </>
+              )}
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('initialPassword')}</label>
-                <input
-                  type="password"
-                  value={newUserPassword}
-                  onChange={(e) => setNewUserPassword(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">{t('roleAssignment')}</label>
+                <label className="block text-xs text-slate-200 mb-1">{t('roleAssignment')}</label>
                 <select
                   value={newUserRole}
                   onChange={(e) => setNewUserRole(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-slate-200 text-xs"
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 >
                   <option value="Engineer">{t('userRoleEngineer')}</option>
                   <option value="ProjectManager">{t('userRolePM')}</option>
@@ -3022,19 +3480,38 @@ export default function Home() {
                 </select>
               </div>
 
+              {editingUserId && (
+                <label className="flex items-center gap-2 text-sm text-white">
+                  <input
+                    type="checkbox"
+                    checked={editingUserActive}
+                    onChange={(e) => setEditingUserActive(e.target.checked)}
+                    className="rounded"
+                  />
+                  {lang === 'ar' ? 'حساب نشط' : 'Account active'}
+                </label>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowNewUserModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800/70 hover:bg-slate-700/45 text-slate-300 text-xs transition-colors"
+                  onClick={() => {
+                    setShowNewUserModal(false);
+                    setEditingUserId(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-700 text-white text-sm"
                 >
                   {t('cancel')}
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-xs font-semibold transition-colors shadow-sm"
+                  className="px-4 py-2 rounded-xl bg-mti-600 hover:bg-mti-500 text-white text-sm font-semibold transition-colors shadow-sm"
                 >
-                  {t('provisionUser')}
+                  {editingUserId
+                    ? lang === 'ar'
+                      ? 'حفظ التعديل'
+                      : 'Save Changes'
+                    : t('provisionUser')}
                 </button>
               </div>
             </form>

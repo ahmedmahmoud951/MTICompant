@@ -396,6 +396,37 @@ public class TasksController : ControllerBase
         return await GetById(task.Id, cancellationToken);
     }
 
+    [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin,SystemAdmin,ProjectManager")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    {
+        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+
+        var task = await _dbContext.Tasks.FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken);
+        if (task == null) return NotFound();
+
+        task.IsDeleted = true;
+        task.DeletedAt = DateTime.UtcNow;
+        task.DeletedBy = userId;
+        task.UpdatedAt = DateTime.UtcNow;
+        task.UpdatedBy = userId;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        await _auditService.LogAsync(
+            "Delete",
+            "TaskItem",
+            task.Id.ToString(),
+            new { task.Title, task.Status },
+            null,
+            cancellationToken);
+
+        await _notificationService.BroadcastGlobalAsync("TaskUpdated", new { taskId = task.Id, deleted = true }, cancellationToken);
+
+        return Ok(new { success = true });
+    }
+
     [HttpPost("{id}/status")]
     public async Task<IActionResult> UpdateStatus(
         Guid id,
