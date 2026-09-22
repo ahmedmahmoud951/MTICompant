@@ -1,0 +1,28 @@
+# Multi-stage Dockerfile for ASP.NET Core 8 Web API
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /app
+
+# Copy solution and project files first for optimal layer caching
+COPY MTI.ProjectManagement.sln ./
+COPY src/MTI.ProjectManagement.Domain/MTI.ProjectManagement.Domain.csproj src/MTI.ProjectManagement.Domain/
+COPY src/MTI.ProjectManagement.Application/MTI.ProjectManagement.Application.csproj src/MTI.ProjectManagement.Application/
+COPY src/MTI.ProjectManagement.Infrastructure/MTI.ProjectManagement.Infrastructure.csproj src/MTI.ProjectManagement.Infrastructure/
+COPY src/MTI.ProjectManagement.Api/MTI.ProjectManagement.Api.csproj src/MTI.ProjectManagement.Api/
+COPY tests/MTI.ProjectManagement.UnitTests/MTI.ProjectManagement.UnitTests.csproj tests/MTI.ProjectManagement.UnitTests/
+
+RUN dotnet restore src/MTI.ProjectManagement.Api/MTI.ProjectManagement.Api.csproj
+
+# Copy full source and build
+COPY . .
+WORKDIR /app/src/MTI.ProjectManagement.Api
+RUN dotnet publish -c Release -o /app/publish /p:UseAppHost=false
+
+# Runtime Image
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+EXPOSE 8080
+ENV ASPNETCORE_URLS=http://+:8080
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+COPY --from=build /app/publish .
+ENTRYPOINT ["dotnet", "MTI.ProjectManagement.Api.dll"]

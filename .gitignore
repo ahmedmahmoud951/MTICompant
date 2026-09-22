@@ -1,0 +1,41 @@
+# Dependencies
+**/node_modules/
+**/packages/
+
+# Build outputs
+**/.next/
+**/out/
+**/dist/
+**/build/
+**/bin/
+**/obj/
+**/publish/
+
+# IDE / OS
+**/.vs/
+**/.vscode/
+**/.idea/
+*.user
+*.suo
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Env & secrets
+**/.env
+**/.env.*
+!**/.env.example
+**/appsettings.Development.json
+**/appsettings.*.local.json
+**/secrets.json
+
+# Logs & temp
+*.log
+**/npm-debug.log*
+**/coverage/
+**/*.tmp
+**/*.temp
+
+# Test results
+**/TestResults/

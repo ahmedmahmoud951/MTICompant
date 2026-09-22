@@ -1,0 +1,6 @@
+@MTI.ProjectManagement.Api_HostAddress = http://localhost:5126
+
+GET {{MTI.ProjectManagement.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
