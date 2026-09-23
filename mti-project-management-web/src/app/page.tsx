@@ -3718,9 +3718,21 @@ export default function Home() {
                               </div>
                             </div>
 
-                            <div className="text-right text-xs text-slate-400">
-                              <div>{t('submittedBy')}: <span className="text-slate-100 font-medium">{r.submitterName}</span></div>
-                              <div className="text-[11px] text-slate-500">{new Date(r.createdAt).toLocaleString()}</div>
+                            <div className="flex items-center gap-2.5 p-2 rounded-xl bg-slate-900/90 border border-cyan-500/35 shadow-sm text-start">
+                              <div className="w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 flex items-center justify-center font-bold text-xs flex-shrink-0">
+                                {r.submitterName ? r.submitterName[0] : 'U'}
+                              </div>
+                              <div className="text-start">
+                                <span className="text-[10px] text-cyan-300 font-bold block">
+                                  {lang === 'ar' ? 'المهندس القائم بالرفع:' : 'Uploaded by:'}
+                                </span>
+                                <span className="text-xs font-bold text-white block">
+                                  {r.submitterName || (lang === 'ar' ? 'غير محدد' : 'Unknown')}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  {new Date(r.createdAt).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')}
+                                </span>
+                              </div>
                             </div>
                           </div>
 
@@ -4217,9 +4229,14 @@ export default function Home() {
                             </div>
 
                             <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-slate-800/80">
-                              <div className="text-[11px] text-slate-400 truncate">
-                                {lang === 'ar' ? 'المسؤول:' : 'Submitter:'}{' '}
-                                <span className="text-slate-200 font-semibold">{r.submitterName}</span>
+                              <div className="flex items-center gap-2 truncate">
+                                <div className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold text-[9px] uppercase flex-shrink-0">
+                                  {r.submitterName ? r.submitterName[0] : 'U'}
+                                </div>
+                                <div className="text-[11px] truncate">
+                                  <span className="text-slate-400">{lang === 'ar' ? 'الرافع: ' : 'Uploaded by: '}</span>
+                                  <span className="text-slate-100 font-bold">{r.submitterName || (lang === 'ar' ? 'غير محدد' : 'Unknown')}</span>
+                                </div>
                               </div>
                               <button
                                 type="button"
@@ -4570,15 +4587,17 @@ export default function Home() {
                                     <MapPin className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
                                     <span className="text-slate-300 truncate">{r.siteName}</span>
                                   </div>
-                                  <div className="flex items-center gap-1.5 truncate">
-                                    <UserIcon className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
-                                    <span className="text-slate-400">{lang === 'ar' ? 'بواسطة:' : 'By:'}</span>
-                                    <span className="text-slate-200 font-medium truncate">{r.submitterName}</span>
+                                  <div className="flex items-center gap-1.5 truncate col-span-full sm:col-span-1 bg-cyan-950/40 px-2 py-1 rounded-lg border border-cyan-500/25">
+                                    <div className="w-4 h-4 rounded-full bg-cyan-500/30 text-cyan-300 flex items-center justify-center font-bold text-[9px] uppercase flex-shrink-0">
+                                      {r.submitterName ? r.submitterName[0] : 'U'}
+                                    </div>
+                                    <span className="text-slate-400 text-[10px]">{lang === 'ar' ? 'الرافع:' : 'Uploaded by:'}</span>
+                                    <span className="text-cyan-200 font-bold truncate">{r.submitterName || (lang === 'ar' ? 'غير محدد' : 'Unknown')}</span>
                                   </div>
-                                  <div className="flex items-center gap-1.5 truncate">
-                                    <Clock className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
-                                    <span className="text-slate-400">{lang === 'ar' ? 'الاعتماد:' : 'Approved:'}</span>
-                                    <span className="text-slate-200 font-medium">
+                                  <div className="flex items-center gap-1.5 truncate col-span-full sm:col-span-1 bg-emerald-950/40 px-2 py-1 rounded-lg border border-emerald-500/25">
+                                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                                    <span className="text-slate-400 text-[10px]">{lang === 'ar' ? 'الاعتماد:' : 'Approved:'}</span>
+                                    <span className="text-emerald-200 font-bold truncate">
                                       {approvalDate ? approvalDate.toLocaleDateString(lang === 'ar' ? 'ar-EG' : 'en-US') : '—'}
                                     </span>
                                   </div>
@@ -5232,17 +5251,46 @@ export default function Home() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-700/60">
-                        {auditLogs.map((log) => (
-                          <tr key={log.id} className="hover:bg-slate-800/75">
-                            <td className="p-3 text-[11px] text-slate-400">{new Date(log.createdAt).toLocaleString()}</td>
-                            <td className="p-3 font-semibold text-slate-100">{log.action}</td>
-                            <td className="p-3 text-slate-300">
-                              {log.entityType} ({log.entityId?.substring(0, 8)}...)
-                            </td>
-                            <td className="p-3 text-slate-400">{log.userEmail || 'System'}</td>
-                            <td className="p-3 text-[11px] text-slate-500 font-mono">{log.ipAddress || '127.0.0.1'}</td>
-                          </tr>
-                        ))}
+                        {auditLogs.map((log) => {
+                          const actionUpper = (log.action || '').toUpperCase();
+                          const isCreate = actionUpper.includes('CREATE') || actionUpper.includes('UPLOAD') || actionUpper.includes('POST');
+                          const isDelete = actionUpper.includes('DELETE') || actionUpper.includes('REJECT');
+                          const isReview = actionUpper.includes('APPROV') || actionUpper.includes('UPDATE');
+
+                          return (
+                            <tr key={log.id} className="hover:bg-slate-800/75 transition-colors">
+                              <td className="p-3 text-[11px] text-slate-400 font-mono">{new Date(log.createdAt).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US')}</td>
+                              <td className="p-3">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                                  isCreate
+                                    ? 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300'
+                                    : isDelete
+                                    ? 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                                    : isReview
+                                    ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                    : 'bg-slate-800 border-slate-700 text-slate-200'
+                                }`}>
+                                  {log.action}
+                                </span>
+                              </td>
+                              <td className="p-3 text-slate-300">
+                                <span className="font-semibold text-slate-200">{log.entityType}</span>{' '}
+                                <span className="text-[10px] font-mono text-slate-500">({log.entityId?.substring(0, 8)}...)</span>
+                              </td>
+                              <td className="p-3">
+                                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-slate-900/90 border border-cyan-500/25">
+                                  <div className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold text-[10px] uppercase">
+                                    {(log.userEmail || 'S')[0]}
+                                  </div>
+                                  <span className="font-semibold text-slate-100 text-xs">
+                                    {log.userEmail || (lang === 'ar' ? 'النظام التلقائي' : 'System')}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="p-3 text-[11px] text-slate-500 font-mono">{log.ipAddress || '127.0.0.1'}</td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

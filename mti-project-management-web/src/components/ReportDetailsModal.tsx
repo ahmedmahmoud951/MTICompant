@@ -384,7 +384,7 @@ export function ReportDetailsModal({
                 <User className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
                 <div className="truncate">
                   <span className="text-slate-500 text-[10px] block">{isAr ? 'المسؤول / المهندس' : 'Submitter'}</span>
-                  <span className="font-semibold text-slate-200">{record.submitterName || '—'}</span>
+                  <span className="font-bold text-cyan-300">{record.submitterName || '—'}</span>
                 </div>
               </div>
 
@@ -397,6 +397,66 @@ export function ReportDetailsModal({
                   </span>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Prominent Submitter & Administrative Audit Card */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-slate-900/95 to-slate-950/90 border border-cyan-500/35 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-600/30 to-sky-400/20 border border-cyan-400/40 text-cyan-300 flex items-center justify-center font-extrabold text-base uppercase shadow-[0_0_20px_rgba(6,182,212,0.3)] flex-shrink-0">
+                {record.submitterName ? record.submitterName[0] : 'U'}
+              </div>
+              <div>
+                <div className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                  <User className="w-3 h-3 text-cyan-400" />
+                  {isAr ? 'المهندس / المسؤول القائم بالرفع' : 'Report Submitter & Field Engineer'}
+                </div>
+                <div className="text-sm font-extrabold text-white mt-0.5">
+                  {record.submitterName || (isAr ? 'غير محدد' : 'Unknown')}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                  <span className="text-slate-400">{isAr ? 'توقيت الإرسال: ' : 'Submitted: '}</span>
+                  <span className="text-slate-200 font-mono">
+                    {record.submittedAt || record.createdAt
+                      ? new Date(record.submittedAt || record.createdAt).toLocaleString(isAr ? 'ar-EG' : 'en-US')
+                      : '—'}
+                  </span>
+                  {record.submittedBy && (
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      (ID: {record.submittedBy.slice(0, 8)}...)
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="text-start sm:text-end pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800 flex-shrink-0">
+              <span className="text-[10px] text-slate-400 block">{isAr ? 'حالة الاعتماد الإداري' : 'Administrative Status'}</span>
+              {record.approvedBy ? (
+                <div className="mt-1">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-300">
+                    <ShieldCheck className="w-3.5 h-3.5" />
+                    {isAr ? `معتمد بواسطة: ${record.approvedBy}` : `Approved by: ${record.approvedBy}`}
+                  </span>
+                  {record.approvedAt && (
+                    <span className="text-[10px] text-slate-500 block mt-0.5 font-mono">
+                      {new Date(record.approvedAt).toLocaleString(isAr ? 'ar-EG' : 'en-US')}
+                    </span>
+                  )}
+                </div>
+              ) : record.rejectedBy ? (
+                <div className="mt-1">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-500/15 border border-rose-500/30 text-rose-300">
+                    <XCircle className="w-3.5 h-3.5" />
+                    {isAr ? `مرفوض بواسطة: ${record.rejectedBy}` : `Rejected by: ${record.rejectedBy}`}
+                  </span>
+                </div>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/15 border border-amber-500/30 text-amber-300 mt-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  {isAr ? 'بانتظار اعتماد الإدارة' : 'Pending Admin Review'}
+                </span>
+              )}
             </div>
           </div>
 
@@ -494,6 +554,10 @@ export function ReportDetailsModal({
                           </h4>
                           <span className="text-[11px] text-slate-400 block mt-0.5">
                             {formatFileSize(att.fileSize)} &bull; {att.contentType || 'file'}
+                          </span>
+                          <span className="text-[10px] text-cyan-300/90 font-medium block mt-0.5">
+                            {isAr ? 'مرفوع بواسطة: ' : 'Uploaded by: '}
+                            <span className="text-white font-semibold">{record.submitterName || '—'}</span>
                           </span>
                         </div>
                       </div>
