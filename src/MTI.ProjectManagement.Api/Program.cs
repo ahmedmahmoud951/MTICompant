@@ -33,6 +33,9 @@ builder.Services.AddSwaggerGen(c =>
         Description = "Enterprise Backend API for MTI Engineering Solutions Project & Site Monitoring Platform"
     });
 
+    c.CustomSchemaIds(type => type.FullName?.Replace('+', '.') ?? type.Name);
+    c.ResolveConflictingActions(apiDescriptions => apiDescriptions.First());
+
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "JWT Authorization header using the Bearer scheme. Example: \"Bearer {token}\"",

@@ -183,7 +183,7 @@ public class PermissionsController : ControllerBase
     /// SECURITY-04: Evaluate permission against resource scope engine.
     /// </summary>
     [HttpGet("evaluate-scope")]
-    public async Task<ActionResult<ApiResponse<object>>> EvaluateScope(
+    public async Task<ActionResult<ApiResponse<EvaluateScopeResponseDto>>> EvaluateScope(
         [FromQuery] Guid userId,
         [FromQuery] string permissionCode,
         [FromQuery] ResourceHierarchyType resourceType,
@@ -193,13 +193,14 @@ public class PermissionsController : ControllerBase
         var hasAccess = await _scopeEngine.CanAccessResourceAsync(userId, permissionCode, resourceType, resourceId, cancellationToken);
         var context = await _scopeEngine.ResolveUserScopeContextAsync(userId, cancellationToken);
 
-        return Ok(ApiResponse<object>.Ok(new
-        {
-            UserId = userId,
-            PermissionCode = permissionCode,
-            ResourceId = resourceId,
-            HasAccess = hasAccess,
-            ResolvedScopeContext = context
-        }));
+        var result = new EvaluateScopeResponseDto(
+            userId,
+            permissionCode,
+            resourceId,
+            hasAccess,
+            context
+        );
+
+        return Ok(ApiResponse<EvaluateScopeResponseDto>.Ok(result));
     }
 }

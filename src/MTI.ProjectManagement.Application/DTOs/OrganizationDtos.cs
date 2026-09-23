@@ -1,3 +1,5 @@
+using MTI.ProjectManagement.Application.Contracts;
+
 namespace MTI.ProjectManagement.Application.DTOs;
 
 // ==========================================
@@ -552,6 +554,14 @@ public record UpdateRolePermissionsRequest(
     List<string> PermissionCodes
 );
 
+public record EvaluateScopeResponseDto(
+    Guid UserId,
+    string PermissionCode,
+    Guid ResourceId,
+    bool HasAccess,
+    UserScopeContext ResolvedScopeContext
+);
+
 // ==========================================
 // 13. UI-ORG-03: Organization Dashboard DTOs
 // ==========================================
@@ -646,12 +656,15 @@ public record AssignmentHistoryDto(
 );
 
 public record AssignmentHistoryFilterRequest(
-    Guid? ResourceId,
-    string? AssignmentType,
-    Guid? TargetUserId,
-    Guid? TargetTeamId,
-    string? Action,
+    Guid? ResourceId = null,
+    string? AssignmentType = null,
+    Guid? TargetUserId = null,
+    Guid? TargetTeamId = null,
+    string? Action = null,
     int PageNumber = 1,
     int PageSize = 50
-);
+)
+{
+    public AssignmentHistoryFilterRequest() : this(null, null, null, null, null, 1, 50) { }
+}
 

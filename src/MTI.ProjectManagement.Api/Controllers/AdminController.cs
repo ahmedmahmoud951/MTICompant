@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MTI.ProjectManagement.Api.Helpers;
@@ -173,19 +173,6 @@ public class AdminController : ControllerBase
             .ToListAsync(cancellationToken);
 
         return Ok(roles);
-    }
-
-    [HttpGet("permissions")]
-    public async Task<IActionResult> GetPermissions(CancellationToken cancellationToken)
-    {
-        var permissions = await _dbContext.Permissions
-            .AsNoTracking()
-            .OrderBy(p => p.Module)
-            .ThenBy(p => p.Code)
-            .Select(p => new { p.Id, p.Code, p.Name, p.Module, p.Description })
-            .ToListAsync(cancellationToken);
-
-        return Ok(permissions);
     }
 
     [HttpPut("roles/{roleId}/permissions")]
