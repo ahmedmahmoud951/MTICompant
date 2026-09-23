@@ -48,6 +48,7 @@ public class Permission : BaseEntity
     public string Name { get; set; } = string.Empty;
     public string Module { get; set; } = string.Empty; // e.g. "Projects"
     public string Description { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
 
     public ICollection<RolePermission> RolePermissions { get; set; } = new List<RolePermission>();
 }
@@ -202,5 +203,25 @@ public class UserPreference : BaseEntity
     public bool NotificationsEnabled { get; set; } = true;
     public bool EmailNotifications { get; set; } = true;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class AssignmentHistory : BaseEntity
+{
+    public string AssignmentType { get; set; } = string.Empty; // UserProject, TeamProject, UserSite, TeamSite, UserTeam, UserDepartment
+    public string Action { get; set; } = string.Empty;         // Assigned, Removed, RoleChanged
+    public Guid ResourceId { get; set; }
+    public string? ResourceName { get; set; }
+    public Guid? TargetUserId { get; set; }
+    public Guid? TargetTeamId { get; set; }
+    public string TargetName { get; set; } = string.Empty;
+    public string? Role { get; set; }
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+    public Guid? AssignedBy { get; set; }
+    public string? AssignedByName { get; set; }
+    public DateTime? RemovedAt { get; set; }
+    public Guid? RemovedBy { get; set; }
+    public string? RemovedByName { get; set; }
+    public string? Reason { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

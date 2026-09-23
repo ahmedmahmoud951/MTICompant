@@ -1427,3 +1427,160 @@ export interface CreateDelegationRequest {
   endAt: string;
 }
 
+// ============================================================
+// SECURITY-03: Dynamic Permission Management
+// ============================================================
+
+export interface PermissionDto {
+  id: string;
+  code: string;
+  name: string;
+  module: string;
+  description?: string;
+  isActive: boolean;
+}
+
+export interface ModulePermissionsDto {
+  module: string;
+  permissions: PermissionDto[];
+}
+
+export interface RolePermissionsDto {
+  roleId: string;
+  roleName: string;
+  description?: string;
+  permissionCodes: string[];
+}
+
+export interface UpdateRolePermissionsRequest {
+  permissionCodes: string[];
+}
+
+export type ResourceScopeType = 'Global' | 'Department' | 'Team' | 'Project' | 'Site' | 'Own';
+
+export type ResourceHierarchyType =
+  | 'Company'
+  | 'Department'
+  | 'Team'
+  | 'Project'
+  | 'Site'
+  | 'Operation'
+  | 'Task'
+  | 'Document'
+  | 'Media';
+
+export interface EvaluateScopeResult {
+  userId: string;
+  permissionCode: string;
+  resourceType: string;
+  resourceId: string;
+  hasAccess: boolean;
+  resolvedScopeContext: {
+    userId: string;
+    fullName: string;
+    email: string;
+    roles: string[];
+    permissions: string[];
+    departmentIds: string[];
+    teamIds: string[];
+    projectIds: string[];
+    siteIds: string[];
+  };
+}
+
+// ============================================================
+// UI-ORG-03: Organization Dashboard
+// ============================================================
+
+export interface SimpleUserSummary {
+  id: string;
+  fullName: string;
+  email: string;
+  roleName?: string;
+}
+
+export interface SimpleProjectSummary {
+  id: string;
+  name: string;
+  code: string;
+  status: string;
+}
+
+export interface SimpleSiteSummary {
+  id: string;
+  name: string;
+  code: string;
+  projectName?: string;
+}
+
+export interface OrgDashboardTeamCard {
+  id: string;
+  name: string;
+  code?: string;
+  departmentName: string;
+  managerName?: string;
+  membersCount: number;
+  projectsCount: number;
+  sitesCount: number;
+  openTasksCount: number;
+  overdueTasksCount: number;
+}
+
+export interface OrgDashboardWarning {
+  code: string;
+  title: string;
+  message: string;
+  severity: 'Critical' | 'Warning' | 'Info';
+  affectedCount: number;
+}
+
+export interface OrganizationDashboard {
+  departmentsCount: number;
+  teamsCount: number;
+  managersCount: number;
+  employeesCount: number;
+  activeProjectsCount: number;
+  activeSitesCount: number;
+  unassignedUsersCount: number;
+  unassignedProjectsCount: number;
+  unassignedSitesCount: number;
+  unassignedUsers: SimpleUserSummary[];
+  unassignedProjects: SimpleProjectSummary[];
+  unassignedSites: SimpleSiteSummary[];
+  teamCards: OrgDashboardTeamCard[];
+  warnings: OrgDashboardWarning[];
+}
+
+// ============================================================
+// ORG-12: Assignment History & Audit Trail
+// ============================================================
+
+export interface AssignmentHistoryDto {
+  id: string;
+  assignmentType: string;
+  action: string;
+  resourceId: string;
+  resourceName?: string;
+  targetUserId?: string;
+  targetTeamId?: string;
+  targetName: string;
+  role?: string;
+  assignedAt: string;
+  assignedBy?: string;
+  assignedByName?: string;
+  removedAt?: string;
+  removedBy?: string;
+  removedByName?: string;
+  reason?: string;
+}
+
+export interface AssignmentHistoryFilterRequest {
+  resourceType?: string;
+  resourceId?: string;
+  targetUserId?: string;
+  targetTeamId?: string;
+  action?: string;
+  pageNumber?: number;
+  pageSize?: number;
+}
+

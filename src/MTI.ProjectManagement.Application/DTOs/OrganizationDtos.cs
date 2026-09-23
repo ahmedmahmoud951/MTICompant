@@ -523,3 +523,135 @@ public record CreateDelegationRequest(
     string? Reason
 );
 
+// ==========================================
+// 12. SECURITY-03: Permissions Management DTOs
+// ==========================================
+
+public record PermissionDto(
+    Guid Id,
+    string Code,
+    string Name,
+    string Module,
+    string Description,
+    bool IsActive
+);
+
+public record ModulePermissionsDto(
+    string Module,
+    List<PermissionDto> Permissions
+);
+
+public record RolePermissionsDto(
+    Guid RoleId,
+    string RoleName,
+    string RoleDescription,
+    List<string> PermissionCodes
+);
+
+public record UpdateRolePermissionsRequest(
+    List<string> PermissionCodes
+);
+
+// ==========================================
+// 13. UI-ORG-03: Organization Dashboard DTOs
+// ==========================================
+
+public record SimpleUserSummaryDto(
+    Guid Id,
+    string FullName,
+    string Email,
+    string? EmployeeCode,
+    string? JobTitle,
+    string? DepartmentName
+);
+
+public record SimpleProjectSummaryDto(
+    Guid Id,
+    string Code,
+    string Name,
+    string Status,
+    string? ClientName
+);
+
+public record SimpleSiteSummaryDto(
+    Guid Id,
+    Guid ProjectId,
+    string ProjectName,
+    string Code,
+    string Name,
+    string Status
+);
+
+public record OrgDashboardTeamCardDto(
+    Guid TeamId,
+    string Name,
+    string Code,
+    string DepartmentName,
+    string? ManagerName,
+    int MembersCount,
+    int ProjectsCount,
+    int SitesCount,
+    int OpenTasksCount,
+    int OverdueTasksCount
+);
+
+public record OrgDashboardWarningDto(
+    string Category, // "Project", "Site", "User", "Task"
+    string Severity, // "Warning", "Critical", "Info"
+    string Title,
+    string Description,
+    Guid? EntityId,
+    string? EntityName
+);
+
+public record OrganizationDashboardDto(
+    int DepartmentsCount,
+    int TeamsCount,
+    int ManagersCount,
+    int EmployeesCount,
+    int ActiveProjectsCount,
+    int ActiveSitesCount,
+    int UnassignedUsersCount,
+    int UnassignedProjectsCount,
+    int UnassignedSitesCount,
+    List<SimpleUserSummaryDto> UnassignedUsers,
+    List<SimpleProjectSummaryDto> UnassignedProjects,
+    List<SimpleSiteSummaryDto> UnassignedSites,
+    List<OrgDashboardTeamCardDto> TeamCards,
+    List<OrgDashboardWarningDto> Warnings
+);
+
+// ==========================================
+// 14. ORG-12: Assignment History DTOs
+// ==========================================
+
+public record AssignmentHistoryDto(
+    Guid Id,
+    string AssignmentType,
+    string Action,
+    Guid ResourceId,
+    string? ResourceName,
+    Guid? TargetUserId,
+    Guid? TargetTeamId,
+    string TargetName,
+    string? Role,
+    DateTime AssignedAt,
+    Guid? AssignedBy,
+    string? AssignedByName,
+    DateTime? RemovedAt,
+    Guid? RemovedBy,
+    string? RemovedByName,
+    string? Reason,
+    DateTime CreatedAt
+);
+
+public record AssignmentHistoryFilterRequest(
+    Guid? ResourceId,
+    string? AssignmentType,
+    Guid? TargetUserId,
+    Guid? TargetTeamId,
+    string? Action,
+    int PageNumber = 1,
+    int PageSize = 50
+);
+

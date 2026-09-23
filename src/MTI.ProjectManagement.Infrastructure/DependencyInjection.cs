@@ -34,6 +34,9 @@ public static class DependencyInjection
         services.AddScoped<IMediaStorageService, BackblazeB2StorageService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IPermissionService, PermissionService>();
+        services.AddScoped<IResourceScopeEngine, ResourceScopeEngine>();
+        services.AddScoped<IAssignmentValidationService, AssignmentValidationService>();
+        services.AddScoped<IAssignmentHistoryService, AssignmentHistoryService>();
         services.AddScoped<IOutboxService, OutboxService>();
 
         // REALTIME-02: Outbox dispatcher (background SignalR publisher)

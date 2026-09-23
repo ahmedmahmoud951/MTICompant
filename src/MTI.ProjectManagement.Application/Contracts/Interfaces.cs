@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using MTI.ProjectManagement.Application.Common;
+using MTI.ProjectManagement.Application.DTOs;
 using MTI.ProjectManagement.Domain.Entities;
 using MTI.ProjectManagement.Domain.Enums;
 
@@ -79,6 +81,7 @@ public interface IAppDbContext
     DbSet<ResourceResponsibility> ResourceResponsibilities { get; }
     DbSet<MasterDataItem> MasterDataItems { get; }
     DbSet<Delegation> Delegations { get; }
+    DbSet<AssignmentHistory> AssignmentHistories { get; }
 
     // Milestones & Assignments
     DbSet<ProjectMilestone> ProjectMilestones { get; }
@@ -233,4 +236,68 @@ public interface IPermissionService
 {
     Task<bool> HasPermissionAsync(Guid userId, string permissionCode, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<string>> GetUserPermissionsAsync(Guid userId, CancellationToken cancellationToken = default);
+}
+
+public record UserScopeContext(
+    Guid UserId,
+    string FullName,
+    string Email,
+    IReadOnlyList<string> Roles,
+    IReadOnlyList<string> Permissions,
+    IReadOnlyList<Guid> DepartmentIds,
+    IReadOnlyList<Guid> TeamIds,
+    IReadOnlyList<Guid> ProjectIds,
+    IReadOnlyList<Guid> SiteIds,
+    IReadOnlyList<DelegationDto> ActiveDelegations
+);
+
+/// <summary>SECURITY-04 & ORG-10: Centralized Resource Scope Engine and Hierarchy</summary>
+public interface IResourceScopeEngine
+{
+    Task<UserScopeContext> ResolveUserScopeContextAsync(Guid userId, CancellationToken cancellationToken = default);
+    Task<bool> CanAccessResourceAsync(Guid userId, string permissionCode, ResourceHierarchyType resourceType, Guid resourceId, CancellationToken cancellationToken = default);
+    Task<bool> CanAccessScopeAsync(Guid userId, string permissionCode, ResourceScopeType scopeType, Guid? scopeId = null, CancellationToken cancellationToken = default);
+}
+
+/// <summary>ORG-11: Server-side Assignment Validation Service</summary>
+public interface IAssignmentValidationService
+{
+    Task<(bool IsValid, string? ErrorMessage)> ValidateProjectUserAssignmentAsync(Guid projectId, Guid userId, string role, CancellationToken cancellationToken = default);
+    Task<(bool IsValid, string? ErrorMessage)> ValidateProjectTeamAssignmentAsync(Guid projectId, Guid teamId, string? role, CancellationToken cancellationToken = default);
+    Task<(bool IsValid, string? ErrorMessage)> ValidateSiteUserAssignmentAsync(Guid siteId, Guid userId, string role, CancellationToken cancellationToken = default);
+    Task<(bool IsValid, string? ErrorMessage)> ValidateSiteTeamAssignmentAsync(Guid siteId, Guid teamId, string? role, CancellationToken cancellationToken = default);
+}
+
+/// <summary>ORG-12: Assignment History and Audit Service</summary>
+public interface IAssignmentHistoryService
+{
+    Task RecordAssignmentAsync(
+        string assignmentType,
+        string action,
+        Guid resourceId,
+        string? resourceName,
+        Guid? targetUserId,
+        Guid? targetTeamId,
+        string targetName,
+        string? role,
+        Guid? assignedBy,
+        string? assignedByName,
+        string? reason = null,
+        CancellationToken cancellationToken = default);
+
+    Task RecordRemovalAsync(
+        string assignmentType,
+        Guid resourceId,
+        string? resourceName,
+        Guid? targetUserId,
+        Guid? targetTeamId,
+        string targetName,
+        Guid? removedBy,
+        string? removedByName,
+        string? reason = null,
+        CancellationToken cancellationToken = default);
+
+    Task<PagedResult<AssignmentHistoryDto>> GetHistoryAsync(
+        AssignmentHistoryFilterRequest filter,
+        CancellationToken cancellationToken = default);
 }

@@ -95,6 +95,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<ResourceResponsibility> ResourceResponsibilities => Set<ResourceResponsibility>();
     public DbSet<MasterDataItem> MasterDataItems => Set<MasterDataItem>();
     public DbSet<Delegation> Delegations => Set<Delegation>();
+    public DbSet<AssignmentHistory> AssignmentHistories => Set<AssignmentHistory>();
 
     // Milestones & Assignments
     public DbSet<ProjectMilestone> ProjectMilestones => Set<ProjectMilestone>();
@@ -1132,6 +1133,25 @@ public class AppDbContext : DbContext, IAppDbContext
                 .WithMany()
                 .HasForeignKey(e => e.CreatedBy)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AssignmentHistory>(entity =>
+        {
+            entity.ToTable("AssignmentHistories");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.AssignmentType).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Action).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.TargetName).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.ResourceName).HasMaxLength(200);
+            entity.Property(e => e.Role).HasMaxLength(100);
+            entity.Property(e => e.AssignedByName).HasMaxLength(200);
+            entity.Property(e => e.RemovedByName).HasMaxLength(200);
+            entity.Property(e => e.Reason).HasMaxLength(500);
+
+            entity.HasIndex(e => new { e.ResourceId, e.AssignmentType });
+            entity.HasIndex(e => e.TargetUserId);
+            entity.HasIndex(e => e.TargetTeamId);
+            entity.HasIndex(e => e.CreatedAt);
         });
     }
 

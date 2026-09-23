@@ -21,19 +21,25 @@ public class ProjectsController : ControllerBase
     private readonly IResourceAuthorizationService _resourceAuthorizationService;
     private readonly IAuditService _auditService;
     private readonly INotificationService _notificationService;
+    private readonly IAssignmentValidationService _assignmentValidationService;
+    private readonly IAssignmentHistoryService _assignmentHistoryService;
 
     public ProjectsController(
         AppDbContext context,
         ICurrentUserService currentUserService,
         IResourceAuthorizationService resourceAuthorizationService,
         IAuditService auditService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        IAssignmentValidationService assignmentValidationService,
+        IAssignmentHistoryService assignmentHistoryService)
     {
         _context = context;
         _currentUserService = currentUserService;
         _resourceAuthorizationService = resourceAuthorizationService;
         _auditService = auditService;
         _notificationService = notificationService;
+        _assignmentValidationService = assignmentValidationService;
+        _assignmentHistoryService = assignmentHistoryService;
     }
 
     /// <summary>
@@ -560,6 +566,13 @@ public class ProjectsController : ControllerBase
         var user = await _context.Users.FindAsync(request.UserId);
         if (user == null) return BadRequest(ApiResponse<ProjectMemberDto>.ErrorResult("المستخدم غير موجود"));
 
+        // ORG-11: Validate assignment server-side
+        var validation = await _assignmentValidationService.ValidateProjectUserAssignmentAsync(id, request.UserId, request.ProjectRole);
+        if (!validation.IsValid)
+        {
+            return BadRequest(ApiResponse<ProjectMemberDto>.ErrorResult(validation.ErrorMessage ?? "فشل التحقق من صحة إسناد العضو للمشروع"));
+        }
+
         var existing = await _context.ProjectMembers
             .FirstOrDefaultAsync(m => m.ProjectId == id && m.UserId == request.UserId);
 
@@ -578,6 +591,11 @@ public class ProjectsController : ControllerBase
             existing.AssignedAt = DateTime.UtcNow;
             existing.AssignedBy = _currentUserService.UserId;
             await _context.SaveChangesAsync();
+
+            // ORG-12: Record assignment history
+            await _assignmentHistoryService.RecordAssignmentAsync(
+                "Project", "Reassigned", id, project.Name, user.Id, null, user.FullName,
+                request.ProjectRole, _currentUserService.UserId, _currentUserService.Email, "إعادة إسناد عضو للمشروع");
 
             return Ok(ApiResponse<ProjectMemberDto>.SuccessResult(new ProjectMemberDto(
                 existing.Id,
@@ -610,6 +628,11 @@ public class ProjectsController : ControllerBase
 
         _context.ProjectMembers.Add(member);
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record assignment history
+        await _assignmentHistoryService.RecordAssignmentAsync(
+            "Project", "Assigned", id, project.Name, user.Id, null, user.FullName,
+            request.ProjectRole, _currentUserService.UserId, _currentUserService.Email, "إسناد عضو للمشروع");
 
         await _auditService.LogAsync("AddProjectMember", "ProjectMember", member.Id.ToString(), null, new
         {
@@ -653,6 +676,9 @@ public class ProjectsController : ControllerBase
 
         if (member == null) return NotFound(ApiResponse<ProjectMemberDto>.ErrorResult("عضوية المشروع غير موجودة"));
 
+        var oldRole = member.ProjectRole;
+        var wasActive = member.IsActive && member.RemovedAt == null;
+
         member.ProjectRole = request.ProjectRole;
         member.Role = request.ProjectRole;
         member.IsPrimary = request.IsPrimary;
@@ -667,6 +693,21 @@ public class ProjectsController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record history
+        if (oldRole != request.ProjectRole)
+        {
+            await _assignmentHistoryService.RecordAssignmentAsync(
+                "Project", "RoleChanged", id, member.Project?.Name, member.UserId, null, member.User?.FullName ?? "Unknown",
+                request.ProjectRole, _currentUserService.UserId, _currentUserService.Email, $"تغيير الدور من {oldRole} إلى {request.ProjectRole}");
+        }
+
+        if (wasActive && (!request.IsActive || member.RemovedAt != null))
+        {
+            await _assignmentHistoryService.RecordRemovalAsync(
+                "Project", id, member.Project?.Name, member.UserId, null, member.User?.FullName ?? "Unknown",
+                _currentUserService.UserId, _currentUserService.Email, "تعطيل عضوية المشروع");
+        }
 
         return Ok(ApiResponse<ProjectMemberDto>.SuccessResult(new ProjectMemberDto(
             member.Id,
@@ -693,13 +734,21 @@ public class ProjectsController : ControllerBase
             return Forbid();
         }
 
-        var member = await _context.ProjectMembers.FirstOrDefaultAsync(m => m.Id == memberId && m.ProjectId == id);
+        var member = await _context.ProjectMembers
+            .Include(m => m.Project)
+            .Include(m => m.User)
+            .FirstOrDefaultAsync(m => m.Id == memberId && m.ProjectId == id);
         if (member == null) return NotFound(ApiResponse<bool>.ErrorResult("عضوية المشروع غير موجودة"));
 
         member.IsActive = false;
         member.RemovedAt = DateTime.UtcNow;
         member.IsPrimary = false;
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record removal in assignment history
+        await _assignmentHistoryService.RecordRemovalAsync(
+            "Project", id, member.Project?.Name, member.UserId, null, member.User?.FullName ?? member.UserId.ToString(),
+            _currentUserService.UserId, _currentUserService.Email, "إزالة العضو من المشروع");
 
         await _auditService.LogAsync("RemoveProjectMember", "ProjectMember", member.Id.ToString(), null, new
         {
@@ -780,6 +829,13 @@ public class ProjectsController : ControllerBase
 
         if (team == null) return BadRequest(ApiResponse<ProjectTeamDto>.ErrorResult("فريق العمل غير موجود"));
 
+        // ORG-11: Server-side Team Assignment Validation
+        var teamValidation = await _assignmentValidationService.ValidateProjectTeamAssignmentAsync(id, request.TeamId, request.TeamRole);
+        if (!teamValidation.IsValid)
+        {
+            return BadRequest(ApiResponse<ProjectTeamDto>.ErrorResult(teamValidation.ErrorMessage ?? "فشل التحقق من صحة إسناد الفريق للمشروع"));
+        }
+
         var existing = await _context.ProjectTeams
             .FirstOrDefaultAsync(pt => pt.ProjectId == id && pt.TeamId == request.TeamId);
 
@@ -796,6 +852,11 @@ public class ProjectsController : ControllerBase
             existing.AssignedAt = DateTime.UtcNow;
             existing.AssignedBy = _currentUserService.UserId;
             await _context.SaveChangesAsync();
+
+            // ORG-12: Record assignment history
+            await _assignmentHistoryService.RecordAssignmentAsync(
+                "Project", "Reassigned", id, project.Name, null, team.Id, team.Name,
+                request.TeamRole, _currentUserService.UserId, _currentUserService.Email, "إعادة إسناد فريق عمل للمشروع");
 
             return Ok(ApiResponse<ProjectTeamDto>.SuccessResult(new ProjectTeamDto(
                 existing.Id,
@@ -827,6 +888,11 @@ public class ProjectsController : ControllerBase
 
         _context.ProjectTeams.Add(projectTeam);
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record assignment history
+        await _assignmentHistoryService.RecordAssignmentAsync(
+            "Project", "Assigned", id, project.Name, null, team.Id, team.Name,
+            request.TeamRole, _currentUserService.UserId, _currentUserService.Email, "إسناد فريق عمل للمشروع");
 
         await _auditService.LogAsync("AssignProjectTeam", "ProjectTeam", projectTeam.Id.ToString(), null, new
         {
@@ -872,12 +938,20 @@ public class ProjectsController : ControllerBase
             return Forbid();
         }
 
-        var pt = await _context.ProjectTeams.FirstOrDefaultAsync(x => x.Id == projectTeamId && x.ProjectId == id);
+        var pt = await _context.ProjectTeams
+            .Include(x => x.Project)
+            .Include(x => x.Team)
+            .FirstOrDefaultAsync(x => x.Id == projectTeamId && x.ProjectId == id);
         if (pt == null) return NotFound(ApiResponse<bool>.ErrorResult("إسناد الفريق للمشروع غير موجود"));
 
         pt.IsActive = false;
         pt.RemovedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record removal history
+        await _assignmentHistoryService.RecordRemovalAsync(
+            "Project", id, pt.Project?.Name, null, pt.TeamId, pt.Team?.Name ?? pt.TeamId.ToString(),
+            _currentUserService.UserId, _currentUserService.Email, "إزالة فريق العمل من المشروع");
 
         await _auditService.LogAsync("RemoveProjectTeam", "ProjectTeam", pt.Id.ToString(), null, new
         {
@@ -909,6 +983,10 @@ public class ProjectsController : ControllerBase
 
         foreach (var user in validUsers)
         {
+            // ORG-11: Validate assignment
+            var validation = await _assignmentValidationService.ValidateProjectUserAssignmentAsync(id, user.Id, request.Role);
+            if (!validation.IsValid) continue;
+
             var existing = await _context.ProjectMembers.FirstOrDefaultAsync(pm => pm.ProjectId == id && pm.UserId == user.Id);
             if (existing != null)
             {
@@ -936,13 +1014,18 @@ public class ProjectsController : ControllerBase
                 resultList.Add(new ProjectMemberDto(member.Id, project.Id, project.Name, user.Id, user.FullName, user.Email, member.ProjectRole, member.IsPrimary, member.AssignedAt, member.AssignedBy, null, null, member.IsActive));
             }
 
+            // ORG-12: Record assignment history
+            await _assignmentHistoryService.RecordAssignmentAsync(
+                "Project", existing != null ? "Reassigned" : "Assigned", id, project.Name, user.Id, null, user.FullName,
+                request.Role, _currentUserService.UserId, _currentUserService.Email, "إسناد جماعي لعضو بالمشروع");
+
             await _notificationService.NotifyProjectAssignedAsync(project.Id, project.Name, user.Id);
         }
 
         await _context.SaveChangesAsync();
-        await _auditService.LogAsync("BatchAssignProjectMembers", "ProjectMember", id.ToString(), null, new { ProjectId = id, UserCount = validUsers.Count, request.Role });
+        await _auditService.LogAsync("BatchAssignProjectMembers", "ProjectMember", id.ToString(), null, new { ProjectId = id, UserCount = resultList.Count, request.Role });
 
-        return Ok(ApiResponse<List<ProjectMemberDto>>.SuccessResult(resultList, $"تم إسناد {validUsers.Count} عضو إلى المشروع بنجاح"));
+        return Ok(ApiResponse<List<ProjectMemberDto>>.SuccessResult(resultList, $"تم إسناد {resultList.Count} عضو إلى المشروع بنجاح"));
     }
 
     [HttpPost("{id:guid}/teams/batch")]
@@ -963,6 +1046,10 @@ public class ProjectsController : ControllerBase
 
         foreach (var team in validTeams)
         {
+            // ORG-11: Validate team assignment
+            var validation = await _assignmentValidationService.ValidateProjectTeamAssignmentAsync(id, team.Id, request.TeamRole);
+            if (!validation.IsValid) continue;
+
             var existing = await _context.ProjectTeams.FirstOrDefaultAsync(pt => pt.ProjectId == id && pt.TeamId == team.Id);
             if (existing != null)
             {
@@ -986,6 +1073,11 @@ public class ProjectsController : ControllerBase
                 resultList.Add(new ProjectTeamDto(pt.Id, project.Id, project.Name, team.Id, team.Name, team.Code, team.ManagerUser?.FullName, pt.TeamRole, team.Members.Count(m => m.IsActive), pt.AssignedAt, pt.AssignedBy, null, null, pt.IsActive));
             }
 
+            // ORG-12: Record assignment history
+            await _assignmentHistoryService.RecordAssignmentAsync(
+                "Project", existing != null ? "Reassigned" : "Assigned", id, project.Name, null, team.Id, team.Name,
+                request.TeamRole, _currentUserService.UserId, _currentUserService.Email, "إسناد جماعي لفريق بالمشروع");
+
             // Notify active team members
             foreach (var memberId in team.Members.Where(m => m.IsActive).Select(m => m.UserId))
             {
@@ -994,9 +1086,9 @@ public class ProjectsController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
-        await _auditService.LogAsync("BatchAssignProjectTeams", "ProjectTeam", id.ToString(), null, new { ProjectId = id, TeamCount = validTeams.Count, request.TeamRole });
+        await _auditService.LogAsync("BatchAssignProjectTeams", "ProjectTeam", id.ToString(), null, new { ProjectId = id, TeamCount = resultList.Count, request.TeamRole });
 
-        return Ok(ApiResponse<List<ProjectTeamDto>>.SuccessResult(resultList, $"تم إسناد {validTeams.Count} فريق إلى المشروع بنجاح"));
+        return Ok(ApiResponse<List<ProjectTeamDto>>.SuccessResult(resultList, $"تم إسناد {resultList.Count} فريق إلى المشروع بنجاح"));
     }
 
     /// <summary>

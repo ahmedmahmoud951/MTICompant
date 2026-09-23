@@ -338,3 +338,26 @@ public enum AuditAction
     RequestCorrection = 17
 }
 
+public enum ResourceScopeType
+{
+    Global = 1,
+    Department = 2,
+    Team = 3,
+    Project = 4,
+    Site = 5,
+    Own = 6
+}
+
+public enum ResourceHierarchyType
+{
+    Company = 1,
+    Department = 2,
+    Team = 3,
+    Project = 4,
+    Site = 5,
+    Operation = 6,
+    Task = 7,
+    Document = 8,
+    Media = 9
+}
+

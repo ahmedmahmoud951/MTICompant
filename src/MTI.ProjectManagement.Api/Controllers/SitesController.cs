@@ -19,17 +19,23 @@ public class SitesController : ControllerBase
     private readonly ICurrentUserService _currentUserService;
     private readonly IResourceAuthorizationService _resourceAuthorizationService;
     private readonly IAuditService _auditService;
+    private readonly IAssignmentValidationService _assignmentValidationService;
+    private readonly IAssignmentHistoryService _assignmentHistoryService;
 
     public SitesController(
         AppDbContext context,
         ICurrentUserService currentUserService,
         IResourceAuthorizationService resourceAuthorizationService,
-        IAuditService auditService)
+        IAuditService auditService,
+        IAssignmentValidationService assignmentValidationService,
+        IAssignmentHistoryService assignmentHistoryService)
     {
         _context = context;
         _currentUserService = currentUserService;
         _resourceAuthorizationService = resourceAuthorizationService;
         _auditService = auditService;
+        _assignmentValidationService = assignmentValidationService;
+        _assignmentHistoryService = assignmentHistoryService;
     }
 
     [HttpGet]
@@ -326,12 +332,24 @@ public class SitesController : ControllerBase
         var user = await _context.Users.FindAsync(request.UserId);
         if (user == null || !user.IsActive) return BadRequest(ApiResponse<SiteMemberDto>.Fail("User is invalid or inactive."));
 
+        // ORG-11: Server-side validation for site user assignment
+        var validation = await _assignmentValidationService.ValidateSiteUserAssignmentAsync(id, request.UserId, request.SiteRole);
+        if (!validation.IsValid)
+        {
+            return BadRequest(ApiResponse<SiteMemberDto>.Fail(validation.ErrorMessage ?? "Invalid site assignment."));
+        }
+
         var existing = await _context.SiteMembers.FirstOrDefaultAsync(sm => sm.SiteId == id && sm.UserId == request.UserId && sm.IsActive);
         if (existing != null)
         {
             existing.SiteRole = request.SiteRole;
             existing.IsPrimary = request.IsPrimary;
             await _context.SaveChangesAsync();
+
+            // ORG-12: Record assignment history
+            await _assignmentHistoryService.RecordAssignmentAsync(
+                "Site", "Reassigned", id, site.Name, user.Id, null, user.FullName,
+                request.SiteRole, _currentUserService.UserId, _currentUserService.Email, "إعادة إسناد عضو للموقع");
 
             var updatedDto = new SiteMemberDto(existing.Id, existing.SiteId, site.Name, site.ProjectId, site.Project.Name, existing.UserId, user.FullName, user.Email, existing.SiteRole, existing.IsPrimary, existing.AssignedAt, existing.AssignedBy, null, existing.RemovedAt, existing.IsActive);
             return Ok(ApiResponse<SiteMemberDto>.Ok(updatedDto, "Site member updated."));
@@ -366,6 +384,12 @@ public class SitesController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record assignment history
+        await _assignmentHistoryService.RecordAssignmentAsync(
+            "Site", "Assigned", id, site.Name, user.Id, null, user.FullName,
+            request.SiteRole, _currentUserService.UserId, _currentUserService.Email, "إسناد عضو للموقع");
+
         await _auditService.LogAsync("AddSiteMember", "SiteMember", member.Id.ToString(), null, member);
 
         var dto = new SiteMemberDto(
@@ -401,6 +425,9 @@ public class SitesController : ControllerBase
 
         if (member == null) return NotFound(ApiResponse<SiteMemberDto>.Fail("Site member not found."));
 
+        var oldRole = member.SiteRole;
+        var wasActive = member.IsActive;
+
         member.SiteRole = request.SiteRole;
         member.IsPrimary = request.IsPrimary;
         if (!request.IsActive && member.IsActive)
@@ -415,6 +442,22 @@ public class SitesController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record role change or removal
+        if (oldRole != request.SiteRole)
+        {
+            await _assignmentHistoryService.RecordAssignmentAsync(
+                "Site", "RoleChanged", id, member.Site?.Name, member.UserId, null, member.User?.FullName ?? "Unknown",
+                request.SiteRole, _currentUserService.UserId, _currentUserService.Email, $"تغيير دور الموقع إلى {request.SiteRole}");
+        }
+
+        if (wasActive && !request.IsActive)
+        {
+            await _assignmentHistoryService.RecordRemovalAsync(
+                "Site", id, member.Site?.Name, member.UserId, null, member.User?.FullName ?? "Unknown",
+                _currentUserService.UserId, _currentUserService.Email, "تعطيل عضوية الموقع");
+        }
+
         await _auditService.LogAsync("UpdateSiteMember", "SiteMember", member.Id.ToString(), null, request);
 
         var dto = new SiteMemberDto(
@@ -443,7 +486,10 @@ public class SitesController : ControllerBase
     {
         if (!await CanManageSiteAsync(id)) return Forbid();
 
-        var member = await _context.SiteMembers.FirstOrDefaultAsync(sm => sm.Id == memberId && sm.SiteId == id && sm.IsActive);
+        var member = await _context.SiteMembers
+            .Include(sm => sm.Site)
+            .Include(sm => sm.User)
+            .FirstOrDefaultAsync(sm => sm.Id == memberId && sm.SiteId == id && sm.IsActive);
         if (member == null) return NotFound(ApiResponse<bool>.Fail("Active site member not found."));
 
         // Historical preservation: soft inactivation
@@ -459,6 +505,12 @@ public class SitesController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record removal in history
+        await _assignmentHistoryService.RecordRemovalAsync(
+            "Site", id, member.Site?.Name, member.UserId, null, member.User?.FullName ?? member.UserId.ToString(),
+            _currentUserService.UserId, _currentUserService.Email, "إزالة عضو من الموقع");
+
         await _auditService.LogAsync("RemoveSiteMember", "SiteMember", memberId.ToString());
 
         return Ok(ApiResponse<bool>.Ok(true, "Site member removed successfully (history preserved)."));
@@ -515,11 +567,23 @@ public class SitesController : ControllerBase
         var team = await _context.Teams.Include(t => t.Members).FirstOrDefaultAsync(t => t.Id == request.TeamId);
         if (team == null || !team.IsActive) return BadRequest(ApiResponse<SiteTeamDto>.Fail("Team is invalid or inactive."));
 
+        // ORG-11: Validate site team assignment
+        var teamValidation = await _assignmentValidationService.ValidateSiteTeamAssignmentAsync(id, request.TeamId, request.TeamRole);
+        if (!teamValidation.IsValid)
+        {
+            return BadRequest(ApiResponse<SiteTeamDto>.Fail(teamValidation.ErrorMessage ?? "Invalid site team assignment."));
+        }
+
         var existing = await _context.SiteTeams.FirstOrDefaultAsync(st => st.SiteId == id && st.TeamId == request.TeamId && st.IsActive);
         if (existing != null)
         {
             existing.TeamRole = request.TeamRole;
             await _context.SaveChangesAsync();
+
+            // ORG-12: Record assignment history
+            await _assignmentHistoryService.RecordAssignmentAsync(
+                "Site", "Reassigned", id, site.Name, null, team.Id, team.Name,
+                request.TeamRole, _currentUserService.UserId, _currentUserService.Email, "إعادة إسناد فريق للموقع");
 
             var updatedDto = new SiteTeamDto(existing.Id, existing.SiteId, site.Name, existing.TeamId, team.Name, team.Code, null, existing.TeamRole, team.Members.Count(m => m.IsActive), existing.AssignedAt, existing.AssignedBy, null, existing.RemovedAt, existing.IsActive);
             return Ok(ApiResponse<SiteTeamDto>.Ok(updatedDto, "Site team updated."));
@@ -537,6 +601,11 @@ public class SitesController : ControllerBase
 
         _context.SiteTeams.Add(siteTeam);
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record assignment history
+        await _assignmentHistoryService.RecordAssignmentAsync(
+            "Site", "Assigned", id, site.Name, null, team.Id, team.Name,
+            request.TeamRole, _currentUserService.UserId, _currentUserService.Email, "إسناد فريق للموقع");
 
         await _auditService.LogAsync("AssignSiteTeam", "SiteTeam", siteTeam.Id.ToString(), null, siteTeam);
 
@@ -565,13 +634,22 @@ public class SitesController : ControllerBase
     {
         if (!await CanManageSiteAsync(id)) return Forbid();
 
-        var siteTeam = await _context.SiteTeams.FirstOrDefaultAsync(st => st.Id == siteTeamId && st.SiteId == id && st.IsActive);
+        var siteTeam = await _context.SiteTeams
+            .Include(st => st.Site)
+            .Include(st => st.Team)
+            .FirstOrDefaultAsync(st => st.Id == siteTeamId && st.SiteId == id && st.IsActive);
         if (siteTeam == null) return NotFound(ApiResponse<bool>.Fail("Active site team assignment not found."));
 
         siteTeam.IsActive = false;
         siteTeam.RemovedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        // ORG-12: Record removal in history
+        await _assignmentHistoryService.RecordRemovalAsync(
+            "Site", id, siteTeam.Site?.Name, null, siteTeam.TeamId, siteTeam.Team?.Name ?? siteTeam.TeamId.ToString(),
+            _currentUserService.UserId, _currentUserService.Email, "إزالة فريق العمل من الموقع");
+
         await _auditService.LogAsync("RemoveSiteTeam", "SiteTeam", siteTeamId.ToString());
 
         return Ok(ApiResponse<bool>.Ok(true, "Team removed from site successfully (history preserved)."));

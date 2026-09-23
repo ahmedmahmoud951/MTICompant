@@ -18,7 +18,10 @@ import {
   UserCheck,
   FolderGit2,
   MapPin,
-  ShieldAlert
+  ShieldAlert,
+  LayoutDashboard,
+  KeyRound,
+  History
 } from 'lucide-react';
 import { organizationService } from '@/services/organization.service';
 import { Department, Team, TeamMember, User } from '@/types';
@@ -32,6 +35,9 @@ import { BatchAssignmentTab } from './BatchAssignmentTab';
 import { TeamManagerHubTab } from './TeamManagerHubTab';
 import { WorkloadTab } from './WorkloadTab';
 import { DelegationsTab } from './DelegationsTab';
+import { OrganizationDashboardTab } from './OrganizationDashboardTab';
+import { PermissionsManagerTab } from './PermissionsManagerTab';
+import { AssignmentHistoryTab } from './AssignmentHistoryTab';
 
 interface OrganizationViewProps {
   currentUser: User | null;
@@ -39,17 +45,20 @@ interface OrganizationViewProps {
 }
 
 export type OrgSubTab =
+  | 'dashboard'
   | 'structure'
   | 'raci'
   | 'master-data'
   | 'users'
+  | 'permissions'
   | 'batch-assignments'
+  | 'assignment-history'
   | 'team-manager'
   | 'workload'
   | 'delegations';
 
 export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser, lang }) => {
-  const [activeSubTab, setActiveSubTab] = useState<OrgSubTab>('structure');
+  const [activeSubTab, setActiveSubTab] = useState<OrgSubTab>('dashboard');
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedDeptId, setSelectedDeptId] = useState<string>('');
   const [teams, setTeams] = useState<Team[]>([]);
@@ -155,6 +164,18 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
       {/* Top Navigation SubTabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-800">
         <button
+          onClick={() => setActiveSubTab('dashboard')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+            activeSubTab === 'dashboard'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+              : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 border border-slate-800'
+          }`}
+        >
+          <LayoutDashboard className="w-4 h-4" />
+          <span>{isArabic ? 'لوحة المؤشرات العامة' : 'Dashboard'}</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('structure')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
             activeSubTab === 'structure'
@@ -203,6 +224,18 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
         </button>
 
         <button
+          onClick={() => setActiveSubTab('permissions')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+            activeSubTab === 'permissions'
+              ? 'bg-fuchsia-600 text-white shadow-md shadow-fuchsia-600/30'
+              : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 border border-slate-800'
+          }`}
+        >
+          <KeyRound className="w-4 h-4" />
+          <span>{isArabic ? 'إدارة الصلاحيات (Security)' : 'Permissions & Scopes'}</span>
+        </button>
+
+        <button
           onClick={() => setActiveSubTab('batch-assignments')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
             activeSubTab === 'batch-assignments'
@@ -212,6 +245,18 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
         >
           <FolderGit2 className="w-4 h-4" />
           <span>{isArabic ? 'التعيين الجماعي' : 'Batch Assignments'}</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('assignment-history')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+            activeSubTab === 'assignment-history'
+              ? 'bg-rose-500 text-white shadow-md shadow-rose-500/30'
+              : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 border border-slate-800'
+          }`}
+        >
+          <History className="w-4 h-4" />
+          <span>{isArabic ? 'سجل التعيينات (Audit)' : 'Assignment History'}</span>
         </button>
 
         <button
@@ -252,6 +297,18 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
       </div>
 
       {/* SubTab Views */}
+      {activeSubTab === 'dashboard' && (
+        <OrganizationDashboardTab currentUser={currentUser} lang={lang} />
+      )}
+
+      {activeSubTab === 'permissions' && (
+        <PermissionsManagerTab currentUser={currentUser} lang={lang} />
+      )}
+
+      {activeSubTab === 'assignment-history' && (
+        <AssignmentHistoryTab currentUser={currentUser} lang={lang} />
+      )}
+
       {activeSubTab === 'raci' && (
         <RaciMatrixTab currentUser={currentUser} lang={lang} />
       )}

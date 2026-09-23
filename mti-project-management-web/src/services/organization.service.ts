@@ -20,7 +20,10 @@ import {
   Delegation,
   CreateDelegationRequest,
   BatchAssignUsersRequest,
-  BatchAssignTeamsRequest
+  BatchAssignTeamsRequest,
+  OrganizationDashboard,
+  AssignmentHistoryDto,
+  AssignmentHistoryFilterRequest
 } from '@/types';
 
 export const organizationService = {
@@ -383,5 +386,33 @@ export const organizationService = {
 
   async revokeDelegation(id: string): Promise<ApiResponse<boolean>> {
     return apiClient.delete(`/api/organization/delegations/${id}`);
+  },
+
+  // ==========================================
+  // UI-ORG-03: Organization Dashboard
+  // ==========================================
+
+  async getOrganizationDashboard(): Promise<ApiResponse<OrganizationDashboard>> {
+    return apiClient.get('/api/organization/dashboard');
+  },
+
+  // ==========================================
+  // ORG-12: Assignment History & Audit Trail
+  // ==========================================
+
+  async getAssignmentHistory(
+    params?: AssignmentHistoryFilterRequest
+  ): Promise<ApiResponse<{ items: AssignmentHistoryDto[]; totalCount: number; pageNumber: number; pageSize: number; totalPages: number }>> {
+    const qs = new URLSearchParams();
+    if (params?.resourceType) qs.append('resourceType', params.resourceType);
+    if (params?.resourceId) qs.append('resourceId', params.resourceId);
+    if (params?.targetUserId) qs.append('targetUserId', params.targetUserId);
+    if (params?.targetTeamId) qs.append('targetTeamId', params.targetTeamId);
+    if (params?.action) qs.append('action', params.action);
+    if (params?.pageNumber) qs.append('pageNumber', String(params.pageNumber));
+    if (params?.pageSize) qs.append('pageSize', String(params.pageSize));
+
+    const query = qs.toString() ? `?${qs.toString()}` : '';
+    return apiClient.get(`/api/organization/assignment-history${query}`);
   }
 };

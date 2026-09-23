@@ -18,15 +18,21 @@ public class OrganizationController : ControllerBase
     private readonly AppDbContext _context;
     private readonly ICurrentUserService _currentUserService;
     private readonly IAuditService _auditService;
+    private readonly IAssignmentValidationService _assignmentValidationService;
+    private readonly IAssignmentHistoryService _assignmentHistoryService;
 
     public OrganizationController(
         AppDbContext context,
         ICurrentUserService currentUserService,
-        IAuditService auditService)
+        IAuditService auditService,
+        IAssignmentValidationService assignmentValidationService,
+        IAssignmentHistoryService assignmentHistoryService)
     {
         _context = context;
         _currentUserService = currentUserService;
         _auditService = auditService;
+        _assignmentValidationService = assignmentValidationService;
+        _assignmentHistoryService = assignmentHistoryService;
     }
 
     private bool HasPermission(string permission)
@@ -1380,5 +1386,212 @@ public class OrganizationController : ControllerBase
         await _auditService.LogAsync("RevokeDelegation", "Delegation", id.ToString());
 
         return Ok(ApiResponse<bool>.SuccessResult(true, "تم إلغاء التفويض بنجاح"));
+    }
+
+    // ==========================================
+    // 12. UI-ORG-03: Organization Dashboard
+    // ==========================================
+
+    [HttpGet("dashboard")]
+    public async Task<ActionResult<ApiResponse<OrganizationDashboardDto>>> GetOrganizationDashboard(CancellationToken cancellationToken = default)
+    {
+        var deptsCount = await _context.Departments.CountAsync(d => d.IsActive, cancellationToken);
+        var teamsCount = await _context.Teams.CountAsync(t => t.IsActive, cancellationToken);
+        var activeProjectsCount = await _context.Projects.CountAsync(p => p.Status == Domain.Enums.ProjectStatus.Active, cancellationToken);
+        var activeSitesCount = await _context.Sites.CountAsync(s => s.Status == Domain.Enums.SiteStatus.Active, cancellationToken);
+        var employeesCount = await _context.Users.CountAsync(u => u.IsActive, cancellationToken);
+        var managersCount = await _context.Users.CountAsync(u => u.IsActive && u.UserRoles.Any(r => r.Role.Name == "ProjectManager" || r.Role.Name == "Admin" || r.Role.Name == "SuperAdmin"), cancellationToken);
+
+        // 1. Unassigned Users
+        var unassignedUsers = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.IsActive
+                && (!u.UserProfile.DepartmentId.HasValue || u.UserProfile.DepartmentId == Guid.Empty)
+                && !_context.TeamMembers.Any(tm => tm.UserId == u.Id && tm.IsActive && tm.LeftAt == null)
+                && !_context.ProjectMembers.Any(pm => pm.UserId == u.Id && pm.IsActive && pm.RemovedAt == null))
+            .Take(20)
+            .Select(u => new SimpleUserSummaryDto(
+                u.Id,
+                u.FullName,
+                u.Email,
+                u.EmployeeCode,
+                u.JobTitle,
+                u.UserProfile != null && u.UserProfile.Department != null ? u.UserProfile.Department.Name : null
+            ))
+            .ToListAsync(cancellationToken);
+
+        // 2. Unassigned Projects
+        var unassignedProjects = await _context.Projects
+            .AsNoTracking()
+            .Where(p => p.Status == Domain.Enums.ProjectStatus.Active
+                && (!_context.ProjectMembers.Any(pm => pm.ProjectId == p.Id && pm.IsActive && pm.RemovedAt == null && (pm.ProjectRole == "ProjectManager" || pm.IsPrimary))
+                    || !_context.ProjectTeams.Any(pt => pt.ProjectId == p.Id && pt.IsActive && pt.RemovedAt == null)))
+            .Take(20)
+            .Select(p => new SimpleProjectSummaryDto(
+                p.Id,
+                p.Code,
+                p.Name,
+                p.Status.ToString(),
+                p.ClientName
+            ))
+            .ToListAsync(cancellationToken);
+
+        // 3. Unassigned Sites
+        var unassignedSites = await _context.Sites
+            .AsNoTracking()
+            .Where(s => s.Status == Domain.Enums.SiteStatus.Active
+                && !_context.SiteMembers.Any(sm => sm.SiteId == s.Id && sm.IsActive && sm.RemovedAt == null && sm.IsPrimary)
+                && !_context.SiteAssignments.Any(sa => sa.SiteId == s.Id && sa.RemovedAt == null && sa.IsPrimary))
+            .Take(20)
+            .Select(s => new SimpleSiteSummaryDto(
+                s.Id,
+                s.ProjectId,
+                s.Project.Name,
+                s.Code,
+                s.Name,
+                s.Status.ToString()
+            ))
+            .ToListAsync(cancellationToken);
+
+        // 4. Team Cards
+        var teamCards = await _context.Teams
+            .AsNoTracking()
+            .Where(t => t.IsActive)
+            .Select(t => new OrgDashboardTeamCardDto(
+                t.Id,
+                t.Name,
+                t.Code,
+                t.Department.Name,
+                t.ManagerUser != null ? t.ManagerUser.FullName : null,
+                t.Members.Count(m => m.IsActive && m.LeftAt == null),
+                _context.ProjectTeams.Count(pt => pt.TeamId == t.Id && pt.IsActive && pt.RemovedAt == null),
+                _context.SiteTeams.Count(st => st.TeamId == t.Id && st.IsActive && st.RemovedAt == null),
+                _context.Tasks.Count(task => task.AssignedToTeamId == t.Id && task.Status != Domain.Enums.TaskItemStatus.Completed && task.Status != Domain.Enums.TaskItemStatus.Cancelled),
+                _context.Tasks.Count(task => task.AssignedToTeamId == t.Id && task.Status != Domain.Enums.TaskItemStatus.Completed && task.Status != Domain.Enums.TaskItemStatus.Cancelled && task.DueAt < DateTime.UtcNow)
+            ))
+            .ToListAsync(cancellationToken);
+
+        // 5. System Health Warnings
+        var warnings = new List<OrgDashboardWarningDto>();
+
+        var projectsWithoutManager = await _context.Projects
+            .AsNoTracking()
+            .Where(p => p.Status == Domain.Enums.ProjectStatus.Active
+                && !_context.ProjectMembers.Any(pm => pm.ProjectId == p.Id && pm.IsActive && pm.RemovedAt == null && (pm.ProjectRole == "ProjectManager" || pm.IsPrimary)))
+            .Select(p => new { p.Id, p.Name, p.Code })
+            .ToListAsync(cancellationToken);
+
+        foreach (var p in projectsWithoutManager)
+        {
+            warnings.Add(new OrgDashboardWarningDto(
+                "Project",
+                "Critical",
+                $"مشروع بدون مدير مسؤول: {p.Name} ({p.Code})",
+                "Project has no designated Project Manager or Primary Responsible leader",
+                p.Id,
+                p.Name
+            ));
+        }
+
+        var projectsWithoutTeam = await _context.Projects
+            .AsNoTracking()
+            .Where(p => p.Status == Domain.Enums.ProjectStatus.Active
+                && !_context.ProjectTeams.Any(pt => pt.ProjectId == p.Id && pt.IsActive && pt.RemovedAt == null))
+            .Select(p => new { p.Id, p.Name, p.Code })
+            .ToListAsync(cancellationToken);
+
+        foreach (var p in projectsWithoutTeam)
+        {
+            warnings.Add(new OrgDashboardWarningDto(
+                "Project",
+                "Warning",
+                $"مشروع بدون فريق عمل مسند: {p.Name} ({p.Code})",
+                "Project has no engineering team attached to its scope",
+                p.Id,
+                p.Name
+            ));
+        }
+
+        var sitesWithoutEngineer = await _context.Sites
+            .AsNoTracking()
+            .Where(s => s.Status == Domain.Enums.SiteStatus.Active
+                && !_context.SiteMembers.Any(sm => sm.SiteId == s.Id && sm.IsActive && sm.RemovedAt == null && sm.IsPrimary)
+                && !_context.SiteAssignments.Any(sa => sa.SiteId == s.Id && sa.RemovedAt == null && sa.IsPrimary))
+            .Select(s => new { s.Id, s.Name, s.Code, ProjectName = s.Project.Name })
+            .ToListAsync(cancellationToken);
+
+        foreach (var s in sitesWithoutEngineer)
+        {
+            warnings.Add(new OrgDashboardWarningDto(
+                "Site",
+                "Critical",
+                $"موقع بدون مهندس مسؤول: {s.Name} ({s.Code})",
+                "Site operations are active but no primary engineer is assigned",
+                s.Id,
+                s.Name
+            ));
+        }
+
+        var usersWithoutDeptCount = await _context.Users
+            .CountAsync(u => u.IsActive && (!u.UserProfile.DepartmentId.HasValue || u.UserProfile.DepartmentId == Guid.Empty), cancellationToken);
+
+        if (usersWithoutDeptCount > 0)
+        {
+            warnings.Add(new OrgDashboardWarningDto(
+                "User",
+                "Warning",
+                $"يوجد {usersWithoutDeptCount} موظف بدون قسم وظيفي",
+                $"{usersWithoutDeptCount} active users are not affiliated with any department",
+                null,
+                null
+            ));
+        }
+
+        var tasksWithoutAssigneeCount = await _context.Tasks
+            .CountAsync(t => t.Status != Domain.Enums.TaskItemStatus.Completed && t.Status != Domain.Enums.TaskItemStatus.Cancelled && !t.AssignedToUserId.HasValue && !t.AssignedToTeamId.HasValue, cancellationToken);
+
+        if (tasksWithoutAssigneeCount > 0)
+        {
+            warnings.Add(new OrgDashboardWarningDto(
+                "Task",
+                "Warning",
+                $"يوجد {tasksWithoutAssigneeCount} مهمة مفتوحة بدون مسؤول",
+                $"{tasksWithoutAssigneeCount} open tasks have no user or team assignee",
+                null,
+                null
+            ));
+        }
+
+        var result = new OrganizationDashboardDto(
+            deptsCount,
+            teamsCount,
+            managersCount,
+            employeesCount,
+            activeProjectsCount,
+            activeSitesCount,
+            unassignedUsers.Count,
+            unassignedProjects.Count,
+            unassignedSites.Count,
+            unassignedUsers,
+            unassignedProjects,
+            unassignedSites,
+            teamCards,
+            warnings
+        );
+
+        return Ok(ApiResponse<OrganizationDashboardDto>.SuccessResult(result));
+    }
+
+    // ==========================================
+    // 13. ORG-12: Assignment History Audit Log
+    // ==========================================
+
+    [HttpGet("assignment-history")]
+    public async Task<ActionResult<ApiResponse<PagedResult<AssignmentHistoryDto>>>> GetAssignmentHistory(
+        [FromQuery] AssignmentHistoryFilterRequest filter,
+        CancellationToken cancellationToken = default)
+    {
+        var history = await _assignmentHistoryService.GetHistoryAsync(filter, cancellationToken);
+        return Ok(ApiResponse<PagedResult<AssignmentHistoryDto>>.SuccessResult(history));
     }
 }

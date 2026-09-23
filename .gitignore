@@ -37,6 +37,7 @@ Desktop.ini
 **/coverage/
 **/*.tmp
 **/*.temp
+scratch/
 
 # Test results
 **/TestResults/
