@@ -24,9 +24,17 @@ export const chatService = {
     return [];
   },
 
-  async sendMessage(conversationId: string, content: string): Promise<Message> {
+  async sendMessage(
+    conversationId: string,
+    content: string,
+    clientMessageId?: string,
+    attachmentMediaIds?: string[]
+  ): Promise<Message> {
+    const uuid = clientMessageId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2));
     const res = await apiClient.post<Message>(`/api/chat/conversations/${conversationId}/messages`, {
       content,
+      clientMessageId: uuid,
+      attachmentMediaIds: attachmentMediaIds || [],
       messageType: 'Text',
     });
     return res.data;

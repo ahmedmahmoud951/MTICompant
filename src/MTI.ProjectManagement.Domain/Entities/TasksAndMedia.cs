@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using MTI.ProjectManagement.Domain.Common;
 using MTI.ProjectManagement.Domain.Enums;
 
@@ -19,15 +20,44 @@ public class TaskItem : FullAuditedEntity
     public Guid? AssignedToUserId { get; set; }
     public User? AssignedToUser { get; set; }
 
+    public Guid? AssignedToTeamId { get; set; }
+
+    public Guid? ParentTaskId { get; set; }
+    public TaskItem? ParentTask { get; set; }
+
+    public decimal ProgressPercentage { get; set; } = 0;
+
     public DateTime? StartAt { get; set; }
+    [NotMapped]
+    public DateTime? StartDate { get => StartAt; set => StartAt = value; }
+
     public DateTime? DueAt { get; set; }
+    [NotMapped]
+    public DateTime? DueDate { get => DueAt; set => DueAt = value; }
+
+
     public DateTime? CompletedAt { get; set; }
 
     // Navigation
+    public ICollection<TaskItem> SubTasks { get; set; } = new List<TaskItem>();
     public ICollection<TaskAssignment> Assignments { get; set; } = new List<TaskAssignment>();
     public ICollection<TaskComment> Comments { get; set; } = new List<TaskComment>();
     public ICollection<TaskAttachment> Attachments { get; set; } = new List<TaskAttachment>();
     public ICollection<TaskStatusHistory> StatusHistory { get; set; } = new List<TaskStatusHistory>();
+    public ICollection<TaskEvent> Events { get; set; } = new List<TaskEvent>();
+}
+
+public class TaskEvent : BaseEntity
+{
+    public Guid TaskId { get; set; }
+    public TaskItem Task { get; set; } = null!;
+
+    public string EventType { get; set; } = string.Empty; // "StatusChanged", "Assigned", "ProgressUpdated", "PriorityChanged", "CommentAdded"
+    public string? OldValue { get; set; }
+    public string? NewValue { get; set; }
+    public Guid PerformedBy { get; set; }
+    public User? Performer { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public class TaskAssignment : BaseEntity
@@ -78,10 +108,13 @@ public class TaskStatusHistory : BaseEntity
 
 public class MediaFile : FullAuditedEntity
 {
-    public string EntityType { get; set; } = string.Empty; // "ProjectData", "Task", "Chat", "Avatar"
+    public string EntityType { get; set; } = string.Empty; // "ProjectData", "Task", "Chat", "Avatar", "Document"
     public Guid? EntityId { get; set; }
     public Guid OwnerUserId { get; set; }
     public User OwnerUser { get; set; } = null!;
+    [NotMapped]
+    public Guid UploadedBy { get => OwnerUserId; set => OwnerUserId = value; }
+
 
     public string StorageProvider { get; set; } = "BackblazeB2";
     public string BucketName { get; set; } = string.Empty;
@@ -93,5 +126,7 @@ public class MediaFile : FullAuditedEntity
     public long FileSize { get; set; }
     public string Status { get; set; } = "Uploaded"; // "Pending", "Uploaded", "Deleted"
     public string? Checksum { get; set; }
+    public string? ETag { get; set; }
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
 }
+

@@ -9,10 +9,13 @@ public record ProjectDto(
     string Description,
     string ClientName,
     ProjectStatus Status,
+    ProjectType Type,
+    decimal ProgressPercentage,
     DateTime? StartDate,
     DateTime? EndDate,
     int TotalSitesCount,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    string? CoverImageUrl = null
 );
 
 public record ProjectDetailDto(
@@ -22,10 +25,13 @@ public record ProjectDetailDto(
     string Description,
     string ClientName,
     ProjectStatus Status,
+    ProjectType Type,
+    decimal ProgressPercentage,
     DateTime? StartDate,
     DateTime? EndDate,
     DateTime CreatedAt,
-    List<SiteSummaryDto> Sites
+    List<SiteSummaryDto> Sites,
+    string? CoverImageUrl = null
 );
 
 public record CreateProjectRequest(
@@ -35,16 +41,39 @@ public record CreateProjectRequest(
     string ClientName,
     DateTime? StartDate,
     DateTime? EndDate,
-    ProjectStatus Status = ProjectStatus.Planning
+    ProjectStatus Status = ProjectStatus.Planning,
+    ProjectType Type = ProjectType.GeneralEngineering,
+    decimal ProgressPercentage = 0,
+    List<Guid>? MemberUserIds = null,
+    string? CoverImageUrl = null
 );
 
 public record UpdateProjectRequest(
     string Name,
     string Description,
     string ClientName,
-    ProjectStatus Status,
-    DateTime? StartDate,
-    DateTime? EndDate
+    ProjectStatus? Status = null,
+    ProjectType? Type = null,
+    decimal? ProgressPercentage = null,
+    DateTime? StartDate = null,
+    DateTime? EndDate = null,
+    List<Guid>? MemberUserIds = null,
+    string? CoverImageUrl = null
+);
+
+public record ProjectMemberDto(
+    Guid Id,
+    Guid ProjectId,
+    Guid UserId,
+    string UserName,
+    string UserEmail,
+    string Role,
+    DateTime JoinedAt
+);
+
+public record AssignProjectMemberRequest(
+    Guid UserId,
+    string Role = "Engineer"
 );
 
 public record SiteDto(

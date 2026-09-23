@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using MTI.ProjectManagement.Api.Helpers;
 using MTI.ProjectManagement.Application.Contracts;
 using MTI.ProjectManagement.Application.DTOs;
 using MTI.ProjectManagement.Domain.Entities;
@@ -40,14 +41,29 @@ public class ProjectDataController : ControllerBase
         [FromBody] CreateProjectDataDto dto,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
-        // 1. Validate Site Authorization (Engineer cannot submit data for unauthorized Site)
-        var canAccessSite = await _resourceAuthorization.CanAccessSiteAsync(userId, dto.SiteId, cancellationToken);
-        if (!canAccessSite)
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("ProjectManager");
+
+        // Resolve site: use provided site, otherwise auto-create/find a default "General" site so upload never blocks
+        var siteId = dto.SiteId;
+        if (!siteId.HasValue || siteId.Value == Guid.Empty)
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "You are not authorized to submit data for this site." });
+            siteId = await EnsureDefaultSiteAsync(dto.ProjectId, userId, cancellationToken: cancellationToken);
+        }
+
+        if (!isAdmin)
+        {
+            var canAccessSite = await _resourceAuthorization.CanAccessSiteAsync(userId, siteId.Value, cancellationToken: cancellationToken);
+            if (!canAccessSite)
+            {
+                // Still allow if user can access the project (member) Ã¢â‚¬â€ attach them to default site
+                var canAccessProject = await _resourceAuthorization.CanAccessProjectAsync(userId, dto.ProjectId, cancellationToken: cancellationToken);
+                if (!canAccessProject)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { message = "You are not authorized to submit data for this project." });
+                }
+            }
         }
 
         var status = dto.SubmitDirectly ? DataRecordStatus.Submitted : DataRecordStatus.Draft;
@@ -56,7 +72,7 @@ public class ProjectDataController : ControllerBase
         var record = new ProjectDataRecord
         {
             ProjectId = dto.ProjectId,
-            SiteId = dto.SiteId,
+            SiteId = siteId.Value,
             SubmittedBy = userId,
             Title = dto.Title,
             Description = dto.Description,
@@ -134,15 +150,15 @@ public class ProjectDataController : ControllerBase
             record.Id.ToString(),
             null,
             new { record.Title, record.Status, record.Version, record.SiteId },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         // Notify Admins if submitted directly
         if (dto.SubmitDirectly)
         {
-            await NotifyAdminsDataSubmittedAsync(record, cancellationToken);
+            await NotifyAdminsDataSubmittedAsync(record, cancellationToken: cancellationToken);
         }
 
-        return await GetById(record.Id, cancellationToken);
+        return await GetById(record.Id, cancellationToken: cancellationToken);
     }
 
     [HttpGet]
@@ -150,8 +166,7 @@ public class ProjectDataController : ControllerBase
         [FromQuery] ProjectDataFilterParams filter,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin");
 
@@ -162,7 +177,7 @@ public class ProjectDataController : ControllerBase
         // Engineer scoping: can see only authorized site data
         if (!isAdmin)
         {
-            var authorizedSiteIds = await _resourceAuthorization.GetAuthorizedSiteIdsAsync(userId, cancellationToken);
+            var authorizedSiteIds = await _resourceAuthorization.GetAuthorizedSiteIdsAsync(userId, cancellationToken: cancellationToken);
             query = query.Where(d => authorizedSiteIds.Contains(d.SiteId));
         }
 
@@ -223,8 +238,7 @@ public class ProjectDataController : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<ProjectDataDetailDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var record = await _dbContext.ProjectDataRecords
             .AsNoTracking()
@@ -235,7 +249,7 @@ public class ProjectDataController : ControllerBase
             .Include(d => d.Approvals).ThenInclude(a => a.Performer)
             .Include(d => d.DataSheets).ThenInclude(s => s.Rows)
             .Include(d => d.Attachments).ThenInclude(a => a.MediaFile)
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken: cancellationToken);
 
         if (record == null) return NotFound(new { message = "Project data record not found." });
 
@@ -243,7 +257,7 @@ public class ProjectDataController : ControllerBase
         var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin");
         if (!isAdmin)
         {
-            var canAccess = await _resourceAuthorization.CanAccessSiteAsync(userId, record.SiteId, cancellationToken);
+            var canAccess = await _resourceAuthorization.CanAccessSiteAsync(userId, record.SiteId, cancellationToken: cancellationToken);
             if (!canAccess) return Forbid();
         }
 
@@ -280,7 +294,7 @@ public class ProjectDataController : ControllerBase
         {
             if (att.MediaFile != null && !att.MediaFile.IsDeleted)
             {
-                var downloadUrl = await _mediaStorage.GeneratePreSignedDownloadUrlAsync(att.MediaFile.ObjectKey, TimeSpan.FromHours(2), cancellationToken);
+                var downloadUrl = await _mediaStorage.GeneratePreSignedDownloadUrlAsync(att.MediaFile.ObjectKey, TimeSpan.FromHours(2), cancellationToken: cancellationToken);
                 attachments.Add(new DataAttachmentDto(
                     att.Id,
                     att.MediaFileId,
@@ -323,14 +337,13 @@ public class ProjectDataController : ControllerBase
         [FromBody] UpdateProjectDataDto dto,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var record = await _dbContext.ProjectDataRecords
             .Include(d => d.DataSheets).ThenInclude(s => s.Rows)
             .Include(d => d.Attachments)
             .Include(d => d.Versions)
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken: cancellationToken);
 
         if (record == null) return NotFound(new { message = "Project data record not found." });
 
@@ -447,20 +460,19 @@ public class ProjectDataController : ControllerBase
             record.Id.ToString(),
             null,
             new { record.Title, record.Version, record.Status },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
-        return await GetById(record.Id, cancellationToken);
+        return await GetById(record.Id, cancellationToken: cancellationToken);
     }
 
     [HttpPost("{id}/submit")]
     public async Task<IActionResult> Submit(Guid id, CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var record = await _dbContext.ProjectDataRecords
             .Include(d => d.Approvals)
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken: cancellationToken);
 
         if (record == null) return NotFound();
 
@@ -493,9 +505,9 @@ public class ProjectDataController : ControllerBase
             record.Id.ToString(),
             new { Status = oldStatus },
             new { Status = record.Status },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
-        await NotifyAdminsDataSubmittedAsync(record, cancellationToken);
+        await NotifyAdminsDataSubmittedAsync(record, cancellationToken: cancellationToken);
 
         return Ok(new { success = true, status = record.Status.ToString() });
     }
@@ -507,12 +519,11 @@ public class ProjectDataController : ControllerBase
         [FromBody] ApprovalDecisionDto dto,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var record = await _dbContext.ProjectDataRecords
             .Include(d => d.Approvals)
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken: cancellationToken);
 
         if (record == null) return NotFound();
 
@@ -538,21 +549,16 @@ public class ProjectDataController : ControllerBase
             record.Id.ToString(),
             new { Status = oldStatus },
             new { Status = record.Status, record.ApprovedBy },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         // Notify Submitting Engineer
-        await _notificationService.SendNotificationAsync(
-            record.SubmittedBy,
-            NotificationType.DataApproved,
-            "Project Data Approved",
-            $"Your data submission '{record.Title}' has been approved. Note: {dto.Comment}",
-            "ProjectData",
-            record.Id.ToString(),
-            cancellationToken);
+        await _notificationService.NotifyDocumentApprovedAsync(
+            record.Id, record.Title, record.SubmittedBy, cancellationToken);
 
         // Broadcast to site and global
-        await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataApproved", new { dataId = record.Id, title = record.Title }, cancellationToken);
-        await _notificationService.BroadcastGlobalAsync("ProjectDataApproved", new { dataId = record.Id, title = record.Title }, cancellationToken);
+        await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataApproved", new { dataId = record.Id, title = record.Title }, cancellationToken: cancellationToken);
+        await _notificationService.BroadcastGlobalAsync("ProjectDataApproved", new { dataId = record.Id, title = record.Title }, cancellationToken: cancellationToken);
+        await _notificationService.BroadcastToAdminsAsync("AdminStatsUpdated", new { }, cancellationToken: cancellationToken);
 
         return Ok(new { success = true, status = record.Status.ToString() });
     }
@@ -564,12 +570,11 @@ public class ProjectDataController : ControllerBase
         [FromBody] ApprovalDecisionDto dto,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var record = await _dbContext.ProjectDataRecords
             .Include(d => d.Approvals)
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken: cancellationToken);
 
         if (record == null) return NotFound();
 
@@ -595,21 +600,15 @@ public class ProjectDataController : ControllerBase
             record.Id.ToString(),
             new { Status = oldStatus },
             new { Status = record.Status, record.RejectedBy },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         // Notify Submitter
-        await _notificationService.SendNotificationAsync(
-            record.SubmittedBy,
-            NotificationType.DataRejected,
-            "Project Data Rejected",
-            $"Your data submission '{record.Title}' was rejected. Reason: {dto.Comment}",
-            "ProjectData",
-            record.Id.ToString(),
-            cancellationToken);
+        await _notificationService.NotifyDocumentRejectedAsync(
+            record.Id, record.Title, record.SubmittedBy, cancellationToken);
 
-        await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken);
-        await _notificationService.BroadcastToAdminsAsync("ProjectDataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken);
-        await _notificationService.BroadcastToUserAsync(record.SubmittedBy, "ProjectDataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken);
+        await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken: cancellationToken);
+        await _notificationService.BroadcastToAdminsAsync("ProjectDataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken: cancellationToken);
+        await _notificationService.BroadcastToUserAsync(record.SubmittedBy, "ProjectDataRejected", new { dataId = record.Id, title = record.Title }, cancellationToken: cancellationToken);
 
         return Ok(new { success = true, status = record.Status.ToString() });
     }
@@ -621,12 +620,11 @@ public class ProjectDataController : ControllerBase
         [FromBody] ApprovalDecisionDto dto,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var record = await _dbContext.ProjectDataRecords
             .Include(d => d.Approvals)
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken: cancellationToken);
 
         if (record == null) return NotFound();
 
@@ -650,19 +648,13 @@ public class ProjectDataController : ControllerBase
             record.Id.ToString(),
             new { Status = oldStatus },
             new { Status = record.Status },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         // Notify Submitter
-        await _notificationService.SendNotificationAsync(
-            record.SubmittedBy,
-            NotificationType.ChangesRequested,
-            "Changes Requested on Project Data",
-            $"Changes requested on '{record.Title}': {dto.Comment}",
-            "ProjectData",
-            record.Id.ToString(),
-            cancellationToken);
+        await _notificationService.NotifyCorrectionRequestedAsync(
+            record.Id, record.Title, record.SubmittedBy, cancellationToken);
 
-        await _notificationService.BroadcastToSiteAsync(record.SiteId, "ChangesRequested", new { dataId = record.Id, title = record.Title }, cancellationToken);
+        await _notificationService.BroadcastToSiteAsync(record.SiteId, "ChangesRequested", new { dataId = record.Id, title = record.Title }, cancellationToken: cancellationToken);
 
         return Ok(new { success = true, status = record.Status.ToString() });
     }
@@ -670,11 +662,10 @@ public class ProjectDataController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var record = await _dbContext.ProjectDataRecords
-            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted, cancellationToken: cancellationToken);
 
         if (record == null) return NotFound();
 
@@ -703,7 +694,7 @@ public class ProjectDataController : ControllerBase
             record.Id.ToString(),
             new { record.Title, record.Status },
             null,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return NoContent();
     }
@@ -719,17 +710,59 @@ public class ProjectDataController : ControllerBase
 
         foreach (var adminId in adminUserIds)
         {
-            await _notificationService.SendNotificationAsync(
-                adminId,
-                NotificationType.DataSubmitted,
-                "New Project Data Submitted",
-                $"New data '{record.Title}' submitted for review.",
+            await _notificationService.NotifyApprovalRequestedAsync(
+                record.Id,
                 "ProjectData",
-                record.Id.ToString(),
+                record.Title,
+                adminId,
                 cancellationToken);
         }
 
-        await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataSubmitted", new { dataId = record.Id, title = record.Title }, cancellationToken);
-        await _notificationService.BroadcastToAdminsAsync("ProjectDataSubmitted", new { dataId = record.Id, title = record.Title }, cancellationToken);
+        await _notificationService.BroadcastToSiteAsync(record.SiteId, "DataSubmitted", new { dataId = record.Id, title = record.Title }, cancellationToken: cancellationToken);
+        await _notificationService.BroadcastToAdminsAsync("ProjectDataSubmitted", new { dataId = record.Id, title = record.Title }, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Ensures every project has at least one site so field reports can be submitted without blocking on missing site.
+    /// </summary>
+    private async Task<Guid> EnsureDefaultSiteAsync(Guid projectId, Guid userId, CancellationToken cancellationToken)
+    {
+        var existing = await _dbContext.Sites
+            .Where(s => s.ProjectId == projectId && !s.IsDeleted)
+            .OrderBy(s => s.CreatedAt)
+            .Select(s => s.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (existing != Guid.Empty) return existing;
+
+        var site = new Site
+        {
+            ProjectId = projectId,
+            Code = "GENERAL",
+            Name = "General Site",
+            Description = "Auto-created default site for project reports",
+            Address = string.Empty,
+            Status = SiteStatus.Active,
+            CreatedBy = userId
+        };
+
+        _dbContext.Sites.Add(site);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        // Allow the submitting engineer to access this site
+        _dbContext.SiteAssignments.Add(new SiteAssignment
+        {
+            SiteId = site.Id,
+            UserId = userId,
+            Role = "Engineer",
+            IsPrimary = true,
+            AssignedAt = DateTime.UtcNow,
+            AssignedBy = userId
+        });
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return site.Id;
     }
 }
+
+

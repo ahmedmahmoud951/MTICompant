@@ -20,7 +20,8 @@ public class TokenService : ITokenService
 
     public (string Token, DateTime ExpiresAt) GenerateAccessToken(User user, IEnumerable<string> roles, IEnumerable<string> permissions)
     {
-        var secret = _configuration["Jwt:SecretKey"] ?? "MTI_SUPER_SECRET_KEY_FOR_ENTERPRISE_AUTHENTICATION_2026_CHANGE_IN_PROD";
+        var secret = _configuration["Jwt:SecretKey"]
+            ?? "MTI_ENGINEERING_SOLUTIONS_SUPER_SECURE_JWT_KEY_2026_PRODUCTION_READY_AUTHENTICATION_TOKEN";
         var issuer = _configuration["Jwt:Issuer"] ?? "MTI.ProjectManagement.Api";
         var audience = _configuration["Jwt:Audience"] ?? "MTI.ProjectManagement.Client";
         var expiryMinutes = int.TryParse(_configuration["Jwt:ExpiryMinutes"], out var minutes) ? minutes : 60;
@@ -32,8 +33,11 @@ public class TokenService : ITokenService
 
         var claims = new List<Claim>
         {
+            // Both forms: some handlers keep "sub", others map to NameIdentifier
             new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(JwtRegisteredClaimNames.Email, user.Email),
+            new(ClaimTypes.Email, user.Email),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
             new("name", user.FullName),
             new("firstName", user.FirstName),

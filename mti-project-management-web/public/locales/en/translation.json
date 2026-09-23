@@ -1,0 +1,240 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "view": "View",
+    "search": "Search",
+    "filter": "Filter",
+    "export": "Export",
+    "print": "Print",
+    "confirm": "Confirm",
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "previous": "Previous",
+    "loading": "Loading...",
+    "noData": "No data available",
+    "error": "An error occurred",
+    "success": "Operation completed successfully",
+    "required": "This field is required",
+    "optional": "Optional",
+    "actions": "Actions",
+    "status": "Status",
+    "name": "Name",
+    "description": "Description",
+    "date": "Date",
+    "createdAt": "Created At",
+    "updatedAt": "Updated At",
+    "yes": "Yes",
+    "no": "No",
+    "all": "All",
+    "unknown": "Unknown",
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "sites": "Sites",
+    "tasks": "Tasks",
+    "documents": "Documents",
+    "chat": "Chat",
+    "technicalOffice": "Technical Office",
+    "accounting": "Accounting",
+    "operations": "Operations",
+    "maintenance": "Maintenance",
+    "procurement": "Procurement",
+    "reports": "Reports",
+    "settings": "Settings",
+    "users": "Users",
+    "admin": "Admin",
+    "notifications": "Notifications",
+    "profile": "Profile",
+    "logout": "Logout",
+    "materials": "Materials",
+    "assets": "Assets",
+    "issues": "Issues",
+    "risks": "Risks"
+  },
+  "projects": {
+    "title": "Projects",
+    "new": "New Project",
+    "status": "Project Status",
+    "progress": "Progress",
+    "client": "Client",
+    "code": "Project Code",
+    "type": "Project Type",
+    "startDate": "Start Date",
+    "endDate": "End Date",
+    "remainingDays": "Remaining Days",
+    "health": "Health",
+    "stage": "Current Stage",
+    "overview": "Overview",
+    "timeline": "Timeline",
+    "members": "Members",
+    "statuses": {
+      "Planning": "Planning",
+      "Active": "Active",
+      "OnHold": "On Hold",
+      "Completed": "Completed",
+      "Archived": "Archived"
+    },
+    "types": {
+      "GeneralEngineering": "General Engineering",
+      "Software": "Software",
+      "CCTV": "CCTV",
+      "AccessControl": "Access Control",
+      "Networking": "Networking",
+      "Maintenance": "Maintenance"
+    }
+  },
+  "sites": {
+    "title": "Sites",
+    "new": "New Site",
+    "address": "Address",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "statuses": {
+      "Pending": "Pending",
+      "Active": "Active",
+      "Suspended": "Suspended",
+      "Completed": "Completed",
+      "Closed": "Closed"
+    }
+  },
+  "tasks": {
+    "title": "Tasks",
+    "new": "New Task",
+    "assignTo": "Assign To",
+    "dueDate": "Due Date",
+    "priority": "Priority",
+    "overdue": "Overdue",
+    "remaining": "Remaining",
+    "statuses": {
+      "Backlog": "Backlog",
+      "ToDo": "To Do",
+      "InProgress": "In Progress",
+      "Blocked": "Blocked",
+      "Review": "Under Review",
+      "Completed": "Completed",
+      "Cancelled": "Cancelled"
+    },
+    "priorities": {
+      "Low": "Low",
+      "Medium": "Medium",
+      "High": "High",
+      "Critical": "Critical"
+    }
+  },
+  "documents": {
+    "title": "Documents",
+    "upload": "Upload Document",
+    "version": "Version",
+    "approvalStatus": "Approval Status",
+    "lockedForEdit": "Locked for Editing",
+    "statuses": {
+      "Draft": "Draft",
+      "PendingApproval": "Pending Approval",
+      "Approved": "Approved",
+      "Rejected": "Rejected",
+      "Archived": "Archived"
+    }
+  },
+  "chat": {
+    "title": "Chat",
+    "newMessage": "New Message",
+    "typeMessage": "Type a message...",
+    "send": "Send",
+    "online": "Online",
+    "offline": "Offline",
+    "lastSeen": "Last seen",
+    "members": "Members",
+    "addMembers": "Add Members",
+    "groupChat": "Group Chat",
+    "directChat": "Direct Message",
+    "projectChat": "Project Chat",
+    "readBy": "Read by"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "markAllRead": "Mark all as read",
+    "noNotifications": "No notifications",
+    "types": {
+      "TaskAssigned": "Task assigned to you",
+      "TaskDueSoon": "Task due soon",
+      "TaskOverdue": "Task overdue",
+      "TaskCompleted": "Task completed",
+      "DocumentUploaded": "Document uploaded",
+      "DocumentApproved": "Document approved",
+      "DocumentRejected": "Document rejected",
+      "CorrectionRequested": "Correction requested",
+      "ProjectAssigned": "Assigned to project",
+      "ProjectUpdated": "Project updated",
+      "MilestoneCompleted": "Milestone completed",
+      "IssueCreated": "Issue created",
+      "IssueAssigned": "Issue assigned to you",
+      "IssueOverdue": "Issue overdue",
+      "MaintenanceCreated": "Maintenance request created",
+      "MaintenanceAssigned": "Maintenance request assigned",
+      "WarrantyExpiring": "Warranty expiring soon",
+      "ChatMessage": "New message",
+      "Mention": "You were mentioned",
+      "ApprovalRequested": "Approval requested"
+    }
+  },
+  "technicalOffice": {
+    "title": "Technical Office",
+    "boq": "Bill of Quantities",
+    "offers": "Offers",
+    "invoices": "Invoices"
+  },
+  "accounting": {
+    "title": "Accounting",
+    "invoices": "Invoices",
+    "payments": "Payments"
+  },
+  "auth": {
+    "login": "Sign In",
+    "logout": "Sign Out",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot password?",
+    "invalidCredentials": "Invalid email or password",
+    "welcome": "Welcome"
+  },
+  "language": {
+    "switch": "Switch Language",
+    "ar": "العربية",
+    "en": "English"
+  },
+  "project": {
+    "commandCenter": "Project Command Center",
+    "tabs": {
+      "overview": "Overview",
+      "timeline": "Timeline",
+      "sites": "Sites",
+      "operations": "Operations",
+      "tasks": "Tasks",
+      "documents": "Documents",
+      "boq": "BOQ",
+      "technicalOffice": "Technical Office",
+      "materials": "Materials",
+      "assets": "Assets",
+      "issues": "Issues",
+      "risks": "Risks",
+      "chat": "Chat",
+      "activity": "Activity",
+      "reports": "Reports"
+    }
+  },
+  "validation": {
+    "required": "This field is required",
+    "email": "Invalid email address",
+    "minLength": "Must be at least {{min}} characters",
+    "maxLength": "Must not exceed {{max}} characters",
+    "invalidFormat": "Invalid format"
+  }
+}

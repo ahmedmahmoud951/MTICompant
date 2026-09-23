@@ -6,11 +6,14 @@ public record CreateTaskDto(
     Guid ProjectId,
     Guid? SiteId,
     string Title,
-    string Description,
+    string? Description = null,
     TaskPriority Priority = TaskPriority.Medium,
     Guid? AssignedToUserId = null,
+    Guid? AssignedToTeamId = null,
     DateTime? StartAt = null,
     DateTime? DueAt = null,
+    decimal? ProgressPercentage = null,
+    TaskItemStatus? Status = null,
     List<Guid>? AttachmentMediaIds = null
 );
 
@@ -21,11 +24,19 @@ public record UpdateTaskDto(
     Guid? AssignedToUserId,
     DateTime? StartAt,
     DateTime? DueAt,
-    TaskItemStatus? Status = null
+    TaskItemStatus? Status = null,
+    Guid? AssignedToTeamId = null,
+    decimal? ProgressPercentage = null
 );
 
 public record CompleteTaskDto(
     string? CompletionComment,
+    List<Guid>? AttachmentMediaIds = null
+);
+
+public record UpdateTaskStatusDto(
+    TaskItemStatus Status,
+    string? Notes = null,
     List<Guid>? AttachmentMediaIds = null
 );
 
@@ -68,12 +79,17 @@ public record TaskDetailDto(
     TaskPriority Priority,
     TaskItemStatus Status,
     bool IsOverdue,
+    TimeSpan? RemainingTime,
+    TimeSpan? OverdueTime,
     Guid? AssignedToUserId,
     string? AssignedToName,
+    Guid? AssignedToTeamId,
+    decimal ProgressPercentage,
     DateTime? StartAt,
     DateTime? DueAt,
     DateTime? CompletedAt,
     Guid? CompletedBy,
+    Guid? CreatedBy,
     List<TaskCommentDto> Comments,
     List<TaskAttachmentDto> Attachments,
     List<TaskStatusHistoryDto> StatusHistory
@@ -89,9 +105,14 @@ public record TaskSummaryDto(
     TaskPriority Priority,
     TaskItemStatus Status,
     bool IsOverdue,
+    TimeSpan? RemainingTime,
+    TimeSpan? OverdueTime,
     Guid? AssignedToUserId,
     string? AssignedToName,
+    Guid? AssignedToTeamId,
+    decimal ProgressPercentage,
     DateTime? DueAt,
+    Guid? CreatedBy,
     DateTime CreatedAt
 );
 

@@ -184,7 +184,10 @@ public class ProjectHub : Hub
 
     private Guid? GetUserId()
     {
-        var claim = Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        return Guid.TryParse(claim, out var id) ? id : _currentUserService.UserId;
+        var claim =
+            Context.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? Context.User?.FindFirst("sub")?.Value;
+        if (Guid.TryParse(claim, out var id)) return id;
+        return _currentUserService.UserId;
     }
 }

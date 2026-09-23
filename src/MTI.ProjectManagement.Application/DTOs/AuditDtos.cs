@@ -11,7 +11,9 @@ public record AuditLogDto(
     string? NewValues,
     string? IpAddress,
     string? UserAgent,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    Guid? ProjectId = null,
+    Guid? SiteId = null
 );
 
 public record AuditLogFilterParams(
@@ -19,6 +21,8 @@ public record AuditLogFilterParams(
     string? Action = null,
     string? EntityType = null,
     string? EntityId = null,
+    Guid? ProjectId = null,  // AUDIT-01
+    Guid? SiteId = null,     // AUDIT-01
     DateTime? DateFrom = null,
     DateTime? DateTo = null,
     string? Search = null,

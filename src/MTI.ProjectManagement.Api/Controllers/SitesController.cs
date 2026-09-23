@@ -32,6 +32,55 @@ public class SitesController : ControllerBase
         _auditService = auditService;
     }
 
+    [HttpGet]
+    public async Task<ActionResult<ApiResponse<List<SiteDto>>>> GetSites()
+    {
+        var userId = _currentUserService.UserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        IQueryable<Site> query = _context.Sites
+            .Include(s => s.Project)
+            .Include(s => s.Assignments)
+                .ThenInclude(a => a.User)
+            .Where(s => !s.IsDeleted);
+
+        if (!_currentUserService.IsAdmin && !_currentUserService.IsSystemAdmin)
+        {
+            var authorizedSiteIds = await _resourceAuthorizationService.GetAuthorizedSiteIdsAsync(userId.Value);
+            var authorizedProjectIds = await _resourceAuthorizationService.GetAuthorizedProjectIdsAsync(userId.Value);
+            query = query.Where(s =>
+                authorizedSiteIds.Contains(s.Id) || authorizedProjectIds.Contains(s.ProjectId));
+        }
+
+        var siteEntities = await query.OrderByDescending(s => s.CreatedAt).ToListAsync();
+
+        var sites = siteEntities.Select(s => new SiteDto(
+            s.Id,
+            s.ProjectId,
+            s.Project.Name,
+            s.Code,
+            s.Name,
+            s.Description,
+            s.Address,
+            s.Latitude,
+            s.Longitude,
+            s.Status,
+            s.CreatedAt,
+            s.Assignments.Where(a => a.IsActive).Select(a => new SiteAssignmentDto(
+                a.Id,
+                a.SiteId,
+                a.UserId,
+                a.User.FullName,
+                a.User.Email,
+                a.Role,
+                a.IsPrimary,
+                a.AssignedAt
+            )).ToList()
+        )).ToList();
+
+        return Ok(ApiResponse<List<SiteDto>>.Ok(sites));
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ApiResponse<SiteDto>>> GetSiteById(Guid id)
     {
@@ -226,3 +275,4 @@ public class SitesController : ControllerBase
         return Ok(ApiResponse<bool>.Ok(true, "Engineer assignment removed."));
     }
 }
+

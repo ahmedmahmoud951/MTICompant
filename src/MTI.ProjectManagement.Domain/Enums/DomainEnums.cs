@@ -2,11 +2,19 @@ namespace MTI.ProjectManagement.Domain.Enums;
 
 public enum UserRoleType
 {
-    SystemAdmin = 1,
+    SuperAdmin = 0,
+    SystemAdmin = 1, // legacy alias of SuperAdmin
     Admin = 2,
     ProjectManager = 3,
     Engineer = 4,
-    Viewer = 5
+    SiteEngineer = 5,
+    SoftwareEngineer = 6,
+    TechnicalOffice = 7,
+    Accounting = 8,
+    Procurement = 9,
+    Maintenance = 10,
+    Viewer = 11,
+    Accountant = 12 // legacy alias of Accounting
 }
 
 public enum ProjectStatus
@@ -55,11 +63,13 @@ public enum TaskPriority
 
 public enum TaskItemStatus
 {
+    Backlog = 0,
     ToDo = 1,
     InProgress = 2,
-    UnderReview = 3,
-    Completed = 4,
-    Cancelled = 5
+    Blocked = 3,
+    Review = 4,
+    Completed = 5,
+    Cancelled = 6
 }
 
 public enum MediaType
@@ -74,16 +84,257 @@ public enum MediaType
 
 public enum NotificationType
 {
+    // Task notifications (NOTIFY-02)
     TaskAssigned = 1,
-    TaskUpdated = 2,
-    TaskCompleted = 3,
-    TaskOverdue = 4,
-    DataSubmitted = 5,
-    DataApproved = 6,
-    DataRejected = 7,
-    ChangesRequested = 8,
-    NewMessage = 9,
-    UserAssignedToSite = 10,
-    ProjectUpdated = 11,
-    SystemNotification = 12
+    TaskDueSoon = 2,
+    TaskOverdue = 3,
+    TaskCompleted = 4,
+
+    // Document notifications
+    DocumentUploaded = 5,
+    DocumentApproved = 6,
+    DocumentRejected = 7,
+    CorrectionRequested = 8,
+
+    // Project notifications
+    ProjectAssigned = 9,
+    ProjectUpdated = 10,
+    MilestoneCompleted = 11,
+
+    // Issue notifications
+    IssueCreated = 12,
+    IssueAssigned = 13,
+    IssueOverdue = 14,
+
+    // Maintenance & Asset notifications
+    MaintenanceCreated = 15,
+    MaintenanceAssigned = 16,
+    WarrantyExpiring = 17,
+
+    // Communication notifications
+    ChatMessage = 18,
+    Mention = 19,
+    ApprovalRequested = 20,
+
+    // Legacy / system
+    TaskUpdated = 21,
+    DataSubmitted = 22,
+    DataApproved = 23,
+    DataRejected = 24,
+    NewMessage = 25,
+    UserAssignedToSite = 26,
+    SystemNotification = 27
 }
+
+public enum ProjectType
+{
+    GeneralEngineering = 1,
+    Software = 2,
+    CCTV = 3,
+    AccessControl = 4,
+    Networking = 5,
+    Maintenance = 6,
+    Integration = 7,
+    Other = 8
+}
+
+public enum ProjectPriority
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Critical = 4
+}
+
+public enum MilestoneStatus
+{
+    Pending = 1,
+    InProgress = 2,
+    Completed = 3,
+    Delayed = 4
+}
+
+public enum DocumentStatus
+{
+    Draft = 1,
+    Submitted = 2,
+    UnderReview = 3,
+    Approved = 4,
+    Rejected = 5,
+    CorrectionRequested = 6,
+    Locked = 7
+}
+
+public enum DocumentVersionStatus
+{
+    Draft = 1,
+    Active = 2,
+    Superseded = 3,
+    Locked = 4,
+    Approved = 5,
+    Rejected = 6,
+    PendingReview = 7
+}
+
+public enum DocumentApprovalStatus
+{
+    Pending = 1,
+    Approved = 2,
+    Rejected = 3,
+    CorrectionRequested = 4
+}
+
+public enum CorrectionStatus
+{
+    Pending = 1,
+    InProgress = 2,
+    Resolved = 3,
+    Cancelled = 4
+}
+
+public enum OfferStatus
+{
+    Draft = 1,
+    Submitted = 2,
+    ClientReview = 3,
+    Accepted = 4,
+    Rejected = 5,
+    Revised = 6
+}
+
+public enum InvoiceStatus
+{
+    Draft = 1,
+    PendingApproval = 2,
+    Approved = 3,
+    Sent = 4,
+    Issued = 4,
+    Paid = 5,
+    PartiallyPaid = 6,
+    Overdue = 7,
+    Cancelled = 8
+}
+
+public enum OperationType
+{
+    Installation = 1,
+    Maintenance = 2,
+    Programming = 3,
+    Configuration = 4,
+    Inspection = 5,
+    Testing = 6,
+    Troubleshooting = 7,
+    SiteSurvey = 8,
+    Handover = 9
+}
+
+public enum SiteOperationStatus
+{
+    Pending = 1,
+    InProgress = 2,
+    Completed = 3,
+    Delayed = 4,
+    Cancelled = 5
+}
+
+public enum DailyReportStatus
+{
+    Draft = 1,
+    Submitted = 2,
+    Reviewed = 3,
+    Approved = 4,
+    Rejected = 5
+}
+
+public enum ConversationType
+{
+    Direct = 1,
+    Project = 2,
+    Site = 3,
+    Team = 4,
+    Group = 5
+}
+
+public enum AssetType
+{
+    Camera = 1,
+    NVR = 2,
+    Switch = 3,
+    AccessController = 4,
+    Reader = 5,
+    DoorController = 6,
+    Server = 7,
+    UPS = 8,
+    Other = 9
+}
+
+public enum MaterialRequestStatus
+{
+    Pending = 1,
+    Approved = 2,
+    Dispatched = 3,
+    ReceivedOnSite = 4,
+    Rejected = 5
+}
+
+public enum AssetStatus
+{
+    Available = 1,
+    AssignedToSite = 2,
+    AssignedToEngineer = 3,
+    UnderMaintenance = 4,
+    Retired = 5
+}
+
+public enum RiskSeverity
+{
+    Low = 1,
+    Medium = 2,
+    High = 3,
+    Critical = 4
+}
+
+public enum RiskStatus
+{
+    Identified = 1,
+    Mitigating = 2,
+    Closed = 3
+}
+
+public enum IssueStatus
+{
+    Open = 1,
+    InProgress = 2,
+    Resolved = 3,
+    Closed = 4
+}
+
+public enum HandoverStatus
+{
+    PendingSnagList = 1,
+    SnagsInProgress = 2,
+    PreliminaryHandover = 3,
+    FinalHandover = 4,
+    UnderWarranty = 5
+}
+public enum AuditAction
+{
+    Create = 1,
+    Update = 2,
+    Delete = 3,
+    Upload = 4,
+    Download = 5,
+    Approve = 6,
+    Reject = 7,
+    Assign = 8,
+    Unassign = 9,
+    Login = 10,
+    Logout = 11,
+    PermissionChange = 12,
+    DocumentCorrection = 13,
+    MessageEdit = 14,
+    MessageDelete = 15,
+    ChangeStatus = 16,
+    RequestCorrection = 17
+}
+

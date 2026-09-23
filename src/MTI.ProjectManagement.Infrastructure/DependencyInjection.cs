@@ -33,6 +33,14 @@ public static class DependencyInjection
         services.AddScoped<IB2StorageService, BackblazeB2StorageService>();
         services.AddScoped<IMediaStorageService, BackblazeB2StorageService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IPermissionService, PermissionService>();
+        services.AddScoped<IOutboxService, OutboxService>();
+
+        // REALTIME-02: Outbox dispatcher (background SignalR publisher)
+        services.AddHostedService<OutboxDispatcher>();
+
+        // Required for PermissionService caching (SECURITY-02)
+        services.AddMemoryCache();
 
         services.AddSignalR();
 

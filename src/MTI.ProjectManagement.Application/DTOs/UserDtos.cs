@@ -35,3 +35,56 @@ public record UpdateUserRequest(
 public record AdminResetPasswordRequest(
     string NewPassword
 );
+
+public record UserProfileDto(
+    Guid UserId,
+    string? Bio,
+    string? ProfilePictureUrl,
+    string? PhoneNumber2,
+    string? Address,
+    string? NationalId,
+    DateTime? BirthDate,
+    string? SkillsJson,
+    string? EmergencyContact
+);
+
+public record UpdateUserProfileRequest(
+    string? Bio,
+    string? ProfilePictureUrl,
+    string? PhoneNumber2,
+    string? Address,
+    string? NationalId,
+    DateTime? BirthDate,
+    string? SkillsJson,
+    string? EmergencyContact
+);
+
+public record UserPreferenceDto(
+    Guid UserId,
+    string Language,
+    string TimeZone,
+    string Theme,
+    bool NotificationsEnabled,
+    bool EmailNotifications,
+    DateTime UpdatedAt
+);
+
+public record UpdateUserPreferenceRequest(
+    string Language = "ar",
+    string TimeZone = "Africa/Cairo",
+    string Theme = "light",
+    bool NotificationsEnabled = true,
+    bool EmailNotifications = true
+);
+
+public record UserSessionDto(
+    Guid Id,
+    Guid UserId,
+    string? IpAddress,
+    string? UserAgent,
+    DateTime CreatedAt,
+    DateTime ExpiresAt,
+    DateTime? LastActivityAt,
+    bool IsActive
+);
+

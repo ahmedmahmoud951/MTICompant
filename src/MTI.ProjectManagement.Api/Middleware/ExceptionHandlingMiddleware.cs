@@ -35,7 +35,8 @@ public class ExceptionHandlingMiddleware
 
         var response = ApiResponse<string>.Fail(
             "An internal error occurred while processing your request.",
-            new List<string> { exception.Message }
+            new List<string> { exception.Message },
+            context.TraceIdentifier
         );
 
         var json = JsonSerializer.Serialize(response);

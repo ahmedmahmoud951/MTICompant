@@ -63,8 +63,8 @@ public class SecurityAndAuthorizationTests
         task.Status = TaskItemStatus.InProgress;
         Assert.Equal(TaskItemStatus.InProgress, task.Status);
 
-        task.Status = TaskItemStatus.UnderReview;
-        Assert.Equal(TaskItemStatus.UnderReview, task.Status);
+        task.Status = TaskItemStatus.Review;
+        Assert.Equal(TaskItemStatus.Review, task.Status);
 
         task.Status = TaskItemStatus.Completed;
         task.CompletedAt = DateTime.UtcNow;

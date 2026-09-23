@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -66,8 +68,25 @@ builder.Services.AddSwaggerGen(c =>
 // 3. Infrastructure Services & EF Core
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
+// NOTIFY-02: background notification scheduler (TaskDueSoon / TaskOverdue / WarrantyExpiring)
+builder.Services.AddHostedService<MTI.ProjectManagement.Api.Services.NotificationSchedulerHostedService>();
+// BACKGROUND-01: document locks, temp cleanup, B2 verify
+builder.Services.AddHostedService<MTI.ProjectManagement.Api.Services.BackgroundMaintenanceHostedService>();
+
 // 4. JWT Authentication & SignalR Token Support
-var jwtSecret = builder.Configuration["Jwt:SecretKey"] ?? "MTI_ENGINEERING_SOLUTIONS_SUPER_SECURE_JWT_KEY_2026_PRODUCTION_READY_AUTHENTICATION_TOKEN";
+// Prefer Jwt:Key, fall back to Jwt:SecretKey, then a stable production fallback so the host can start.
+var jwtSecret = builder.Configuration["Jwt:Key"]
+                ?? builder.Configuration["Jwt:SecretKey"];
+if (string.IsNullOrWhiteSpace(jwtSecret)
+    || jwtSecret.Contains("REPLACE", StringComparison.OrdinalIgnoreCase)
+    || jwtSecret.Contains("YOUR_", StringComparison.OrdinalIgnoreCase)
+    || jwtSecret.Contains("CHANGE_ME", StringComparison.OrdinalIgnoreCase))
+{
+    // Keep tokens valid across restarts; override via env Jwt__SecretKey when possible.
+    jwtSecret = "MTI_ENGINEERING_SOLUTIONS_SUPER_SECURE_JWT_KEY_2026_PRODUCTION_READY_AUTHENTICATION_TOKEN";
+    Console.WriteLine("[WARN] Jwt:SecretKey missing/placeholder — using built-in fallback. Set Jwt__SecretKey in host environment.");
+}
+
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "MTI.ProjectManagement.Api";
 var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "MTI.ProjectManagement.Client";
 
@@ -78,8 +97,10 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
-    options.RequireHttpsMetadata = false;
+    options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
     options.SaveToken = true;
+    // Keep JWT claim types as issued (sub/role) so roles & user id resolve on every device/network
+    options.MapInboundClaims = false;
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
@@ -87,14 +108,32 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidAudience = jwtAudience,
         ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret!)),
         ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
+        ClockSkew = TimeSpan.FromMinutes(2),
+        NameClaimType = JwtRegisteredClaimNames.Sub,
+        RoleClaimType = "role"
     };
 
     // Support token query string for SignalR WebSocket connection
     options.Events = new JwtBearerEvents
     {
+        OnTokenValidated = context =>
+        {
+            // MapInboundClaims=false keeps "sub"; many controllers still read ClaimTypes.NameIdentifier.
+            // Mirror sub → NameIdentifier so chat/project-data/etc. never 401 after a valid login.
+            if (context.Principal?.Identity is ClaimsIdentity identity
+                && identity.FindFirst(ClaimTypes.NameIdentifier) == null)
+            {
+                var sub = identity.FindFirst("sub")?.Value
+                          ?? identity.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+                if (!string.IsNullOrEmpty(sub))
+                {
+                    identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, sub));
+                }
+            }
+            return Task.CompletedTask;
+        },
         OnMessageReceived = context =>
         {
             var accessToken = context.Request.Query["access_token"];
@@ -110,21 +149,48 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-// 5. CORS Configuration
+// 5. CORS Configuration — Cors:Origins or Cors:AllowedOrigins; Production requires origins
+var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>()
+                  ?? builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                  ?? Array.Empty<string>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("CorsPolicy", policy =>
     {
-        policy.SetIsOriginAllowed(_ => true)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
+        if (corsOrigins.Length > 0)
+        {
+            policy.WithOrigins(corsOrigins)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else if (builder.Environment.IsDevelopment())
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
+        else
+        {
+            // Do not crash the host — allow known MTI origins as a safe default.
+            Console.WriteLine("[WARN] Cors:AllowedOrigins empty — using default MTI origins.");
+            policy.WithOrigins(
+                      "https://mticompany.runasp.net",
+                      "https://mtiapi.runasp.net",
+                      "http://localhost:3000",
+                      "http://localhost:3001")
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()
+                  .AllowCredentials();
+        }
     });
 });
 
 var app = builder.Build();
 
-// 6. Automatic Database Seeding on Startup
+// 6. Automatic Database Seeding on Startup (rich sample data only in Development)
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
@@ -132,8 +198,26 @@ using (var scope = app.Services.CreateScope())
     try
     {
         var context = services.GetRequiredService<AppDbContext>();
+        // Soft schema patch: project cover images
+        try
+        {
+            await context.Database.ExecuteSqlRawAsync(@"
+IF COL_LENGTH('Projects', 'CoverImageUrl') IS NULL
+BEGIN
+    ALTER TABLE Projects ADD CoverImageUrl nvarchar(max) NULL;
+END");
+        }
+        catch (Exception schemaEx)
+        {
+            logger.LogWarning(schemaEx, "Could not ensure Projects.CoverImageUrl column.");
+        }
         var hasher = services.GetRequiredService<IPasswordHasher>();
         await DatabaseSeeder.SeedAsync(context, hasher);
+        if (app.Environment.IsDevelopment())
+        {
+            await DatabaseSeeder.SeedDevelopmentSampleDataAsync(context, hasher);
+            logger.LogInformation("Development sample data seed completed.");
+        }
         logger.LogInformation("Database seed check completed successfully.");
     }
     catch (Exception ex)
@@ -148,7 +232,7 @@ app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 app.UseStaticFiles();
 
-// Always enable Swagger UI in Development and Production
+// Swagger UI (Development + Production — linked from the API home page)
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
@@ -202,11 +286,224 @@ app.MapGet("/", () => Results.Content(GetMtiLandingHtml(), "text/html", System.T
 
 app.MapControllers();
 
-// SignalR Hubs & Aliases
+// SignalR Hubs & Aliases (Centralized Infrastructure - PROMPT REALTIME-01)
+app.MapHub<ProjectHub>("/hubs/realtime");
 app.MapHub<ProjectHub>("/hubs/project");
 app.MapHub<ProjectHub>("/hubs/events");
 app.MapHub<ProjectHub>("/hubs/project-hub");
 app.MapHub<ProjectHub>("/hubs/chat-hub");
+
+// 10. Seed Roles & Permissions (SECURITY-02) — never crash host on seed conflicts
+using (var scope = app.Services.CreateScope())
+{
+    var seedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<MTI.ProjectManagement.Infrastructure.Persistence.AppDbContext>();
+
+        // ── Roles (SECURITY-02) ───────────────────────────────────────
+        var roleNames = new[]
+        {
+            "SuperAdmin", "Admin", "ProjectManager", "Engineer", "SiteEngineer",
+            "SoftwareEngineer", "TechnicalOffice", "Accounting", "Procurement", "Maintenance", "Viewer"
+        };
+
+        var existingRoles = db.Roles.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var roleName in roleNames)
+        {
+            if (!existingRoles.ContainsKey(roleName))
+            {
+                db.Roles.Add(new MTI.ProjectManagement.Domain.Entities.Role
+                {
+                    Name = roleName,
+                    Description = $"{roleName} system role",
+                    IsSystemRole = true,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
+        await db.SaveChangesAsync();
+
+        // ── Permissions (SECURITY-02) ─────────────────────────────────
+        var permissionDefs = new (string Code, string Name, string Module)[]
+        {
+            ("Projects.View",   "View Projects",       "Projects"),
+            ("Projects.Create", "Create Projects",     "Projects"),
+            ("Projects.Edit",   "Edit Projects",       "Projects"),
+            ("Projects.Delete", "Delete Projects",     "Projects"),
+            ("Sites.View",      "View Sites",          "Sites"),
+            ("Sites.Create",    "Create Sites",        "Sites"),
+            ("Sites.Edit",      "Edit Sites",          "Sites"),
+            ("Tasks.View",      "View Tasks",          "Tasks"),
+            ("Tasks.Create",    "Create Tasks",        "Tasks"),
+            ("Tasks.Assign",    "Assign Tasks",        "Tasks"),
+            ("Tasks.Edit",      "Edit Tasks",          "Tasks"),
+            ("Tasks.Complete",  "Complete Tasks",      "Tasks"),
+            ("Documents.View",              "View Documents",             "Documents"),
+            ("Documents.Upload",            "Upload Documents",           "Documents"),
+            ("Documents.Download",          "Download Documents",         "Documents"),
+            ("Documents.EditOwnPending",    "Edit Own Pending Documents", "Documents"),
+            ("Documents.DeleteOwnPending",  "Delete Own Pending Docs",   "Documents"),
+            ("Documents.Approve",           "Approve Documents",         "Documents"),
+            ("Documents.Reject",            "Reject Documents",          "Documents"),
+            ("Documents.RequestCorrection", "Request Correction",        "Documents"),
+            ("BOQ.View",    "View BOQ",    "BOQ"),
+            ("BOQ.Create",  "Create BOQ",  "BOQ"),
+            ("BOQ.Edit",    "Edit BOQ",    "BOQ"),
+            ("BOQ.Approve", "Approve BOQ", "BOQ"),
+            ("Invoices.View",    "View Invoices",    "Invoices"),
+            ("Invoices.Create",  "Create Invoices",  "Invoices"),
+            ("Invoices.Edit",    "Edit Invoices",    "Invoices"),
+            ("Invoices.Approve", "Approve Invoices", "Invoices"),
+            ("Chat.View",      "View Chat",           "Chat"),
+            ("Chat.Send",      "Send Messages",       "Chat"),
+            ("Chat.DeleteOwn", "Delete Own Messages", "Chat"),
+            ("Chat.EditOwn",   "Edit Own Messages",   "Chat"),
+            ("Users.View",     "View Users",          "Users"),
+            ("Users.Create",   "Create Users",        "Users"),
+            ("Users.Edit",     "Edit Users",          "Users"),
+            ("Users.Disable",  "Disable Users",       "Users"),
+        };
+
+        // Case-insensitive: SQL unique index IX_Permissions_Code is typically CI
+        var existingPerms = db.Permissions
+            .AsEnumerable()
+            .GroupBy(p => p.Code, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (code, name, module) in permissionDefs)
+        {
+            if (!existingPerms.ContainsKey(code))
+            {
+                var perm = new MTI.ProjectManagement.Domain.Entities.Permission
+                {
+                    Code = code,
+                    Name = name,
+                    Module = module,
+                    Description = name
+                };
+                db.Permissions.Add(perm);
+                existingPerms[code] = perm;
+            }
+        }
+        await db.SaveChangesAsync();
+
+        // ── Default Role-Permission Assignments ───────────────────────
+        var allRoles = db.Roles.ToDictionary(r => r.Name, StringComparer.OrdinalIgnoreCase);
+        var allPerms = db.Permissions
+            .AsEnumerable()
+            .GroupBy(p => p.Code, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var existingRolePerms = db.RolePermissions
+            .Select(rp => new { rp.RoleId, rp.PermissionId })
+            .AsEnumerable()
+            .Select(x => (x.RoleId, x.PermissionId))
+            .ToHashSet();
+
+        void Grant(string roleName, params string[] codes)
+        {
+            if (!allRoles.TryGetValue(roleName, out var role)) return;
+            foreach (var code in codes.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                if (!allPerms.TryGetValue(code, out var perm)) continue;
+                var key = (role.Id, perm.Id);
+                if (existingRolePerms.Contains(key)) continue;
+                db.RolePermissions.Add(new MTI.ProjectManagement.Domain.Entities.RolePermission
+                {
+                    RoleId = role.Id,
+                    PermissionId = perm.Id
+                });
+                existingRolePerms.Add(key);
+            }
+        }
+
+        var allCodes = permissionDefs.Select(p => p.Code).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        Grant("SuperAdmin", allCodes);
+        Grant("Admin", allCodes);
+        Grant("ProjectManager",
+            "Projects.View", "Projects.Create", "Projects.Edit",
+            "Sites.View", "Sites.Create", "Sites.Edit",
+            "Tasks.View", "Tasks.Create", "Tasks.Assign", "Tasks.Edit", "Tasks.Complete",
+            "Documents.View", "Documents.Upload", "Documents.Download", "Documents.EditOwnPending",
+            "Documents.DeleteOwnPending", "Documents.Approve", "Documents.Reject", "Documents.RequestCorrection",
+            "Chat.View", "Chat.Send", "Chat.DeleteOwn", "Chat.EditOwn",
+            "Users.View");
+        Grant("Engineer",
+            "Projects.View", "Sites.View",
+            "Tasks.View", "Tasks.Complete",
+            "Documents.View", "Documents.Upload", "Documents.Download",
+            "Documents.EditOwnPending", "Documents.DeleteOwnPending",
+            "Chat.View", "Chat.Send", "Chat.DeleteOwn", "Chat.EditOwn");
+        Grant("SiteEngineer",
+            "Projects.View", "Sites.View",
+            "Tasks.View", "Tasks.Complete",
+            "Documents.View", "Documents.Upload", "Documents.Download",
+            "Documents.EditOwnPending", "Documents.DeleteOwnPending",
+            "Chat.View", "Chat.Send", "Chat.DeleteOwn", "Chat.EditOwn");
+        Grant("SoftwareEngineer",
+            "Projects.View", "Sites.View",
+            "Tasks.View", "Tasks.Create", "Tasks.Edit", "Tasks.Complete",
+            "Documents.View", "Documents.Upload", "Documents.Download",
+            "Chat.View", "Chat.Send", "Chat.DeleteOwn", "Chat.EditOwn");
+        Grant("TechnicalOffice",
+            "Projects.View", "Sites.View",
+            "BOQ.View", "BOQ.Create", "BOQ.Edit",
+            "Documents.View", "Documents.Upload", "Documents.Download",
+            "Documents.Approve", "Documents.Reject",
+            "Chat.View", "Chat.Send");
+        Grant("Accounting",
+            "Invoices.View", "Invoices.Create", "Invoices.Edit", "Invoices.Approve",
+            "BOQ.View",
+            "Documents.View", "Documents.Download",
+            "Chat.View", "Chat.Send");
+        Grant("Procurement",
+            "Projects.View", "Sites.View",
+            "Documents.View", "Documents.Download",
+            "Chat.View", "Chat.Send");
+        Grant("Maintenance",
+            "Projects.View", "Sites.View",
+            "Tasks.View", "Tasks.Complete",
+            "Documents.View", "Documents.Upload", "Documents.Download",
+            "Chat.View", "Chat.Send");
+        Grant("Viewer",
+            "Projects.View", "Sites.View", "Tasks.View",
+            "Documents.View", "Documents.Download",
+            "Chat.View", "BOQ.View", "Invoices.View");
+
+        await db.SaveChangesAsync();
+
+        // ── Supported Languages (DB-I18N) ─────────────────────────────
+        var languages = new[]
+        {
+            new { Code = "ar", NameAr = "العربية",  NameEn = "Arabic",  Direction = "rtl", IsDefault = true,  SortOrder = 1 },
+            new { Code = "en", NameAr = "الإنجليزية", NameEn = "English", Direction = "ltr", IsDefault = false, SortOrder = 2 }
+        };
+
+        var existingLangCodes = db.SupportedLanguages.Select(l => l.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var lang in languages)
+        {
+            if (!existingLangCodes.Contains(lang.Code))
+            {
+                db.SupportedLanguages.Add(new MTI.ProjectManagement.Domain.Entities.SupportedLanguage
+                {
+                    Code = lang.Code,
+                    NameAr = lang.NameAr,
+                    NameEn = lang.NameEn,
+                    Direction = lang.Direction,
+                    IsDefault = lang.IsDefault,
+                    IsActive = true,
+                    SortOrder = lang.SortOrder
+                });
+            }
+        }
+        await db.SaveChangesAsync();
+        seedLogger.LogInformation("SECURITY-02 role/permission seed completed.");
+    }
+    catch (Exception ex)
+    {
+        seedLogger.LogError(ex, "SECURITY-02 seed failed (non-fatal): {Message}", ex.Message);
+    }
+}
 
 app.Run();
 

@@ -34,6 +34,8 @@ public class AuditService : IAuditService
         string? entityId,
         object? oldValues = null,
         object? newValues = null,
+        Guid? projectId = null,
+        Guid? siteId = null,
         CancellationToken cancellationToken = default)
     {
         var httpContext = _httpContextAccessor.HttpContext;
@@ -46,6 +48,8 @@ public class AuditService : IAuditService
             Action = action,
             EntityType = entityType,
             EntityId = entityId,
+            ProjectId = projectId,
+            SiteId = siteId,
             OldValues = oldValues != null ? JsonSerializer.Serialize(oldValues, JsonOptions) : null,
             NewValues = newValues != null ? JsonSerializer.Serialize(newValues, JsonOptions) : null,
             IpAddress = ip,

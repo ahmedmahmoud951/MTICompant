@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -101,7 +101,7 @@ public class UsersController : ControllerBase
         [FromBody] CreateUserRequest request,
         CancellationToken cancellationToken)
     {
-        var exists = await _dbContext.Users.AnyAsync(u => u.Email.ToLower() == request.Email.ToLower() && !u.IsDeleted, cancellationToken);
+        var exists = await _dbContext.Users.AnyAsync(u => u.Email.ToLower() == request.Email.ToLower() && !u.IsDeleted, cancellationToken: cancellationToken);
         if (exists) return BadRequest(new { message = "A user with this email address already exists." });
 
         var adminIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -120,7 +120,7 @@ public class UsersController : ControllerBase
         };
 
         var roleName = string.IsNullOrWhiteSpace(request.Role) ? "Engineer" : request.Role;
-        var role = await _dbContext.Roles.FirstOrDefaultAsync(r => r.Name == roleName, cancellationToken);
+        var role = await _dbContext.Roles.FirstOrDefaultAsync(r => r.Name == roleName, cancellationToken: cancellationToken);
         if (role != null)
         {
             user.UserRoles.Add(new UserRole { User = user, RoleId = role.Id });
@@ -135,7 +135,7 @@ public class UsersController : ControllerBase
             user.Id.ToString(),
             null,
             new { user.Email, user.FirstName, user.LastName, user.JobTitle, Role = roleName },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return CreatedAtAction(nameof(GetById), new { id = user.Id }, new AdminUserDto(
             user.Id,
@@ -159,7 +159,7 @@ public class UsersController : ControllerBase
     {
         var user = await _dbContext.Users
             .Include(u => u.UserRoles)
-            .FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted, cancellationToken: cancellationToken);
 
         if (user == null) return NotFound();
 
@@ -194,7 +194,7 @@ public class UsersController : ControllerBase
             user.Id.ToString(),
             null,
             new { user.FirstName, user.LastName, user.JobTitle, user.IsActive, request.Roles },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         var updatedRoles = await _dbContext.UserRoles
             .Where(ur => ur.UserId == user.Id)
@@ -224,7 +224,7 @@ public class UsersController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.NewPassword) || request.NewPassword.Length < 6)
             return BadRequest(new { message = "Password must be at least 6 characters long." });
 
-        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted, cancellationToken);
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted, cancellationToken: cancellationToken);
         if (user == null) return NotFound();
 
         var adminIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -242,7 +242,7 @@ public class UsersController : ControllerBase
             user.Id.ToString(),
             null,
             new { Message = "Admin reset user password" },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return Ok(new { success = true, message = "Password successfully reset." });
     }
@@ -250,7 +250,7 @@ public class UsersController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted, cancellationToken);
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted, cancellationToken: cancellationToken);
         if (user == null) return NotFound();
 
         var adminIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -269,8 +269,10 @@ public class UsersController : ControllerBase
             user.Id.ToString(),
             null,
             new { user.Email },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
         return NoContent();
     }
 }
+
+

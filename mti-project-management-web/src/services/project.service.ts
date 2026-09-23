@@ -9,7 +9,10 @@ export interface CreateProjectPayload {
   startDate?: string;
   endDate?: string;
   status?: string;
+  type?: string;
+  progressPercentage?: number;
   memberUserIds?: string[];
+  coverImageUrl?: string | null;
 }
 
 export interface CreateSitePayload {
@@ -82,6 +85,10 @@ export const projectService = {
 };
 
 export const siteService = {
+  async getAllSites(): Promise<ApiResponse<Site[]>> {
+    return apiClient.get('/api/sites');
+  },
+
   async getSiteById(id: string): Promise<ApiResponse<Site>> {
     return apiClient.get(`/api/sites/${id}`);
   },

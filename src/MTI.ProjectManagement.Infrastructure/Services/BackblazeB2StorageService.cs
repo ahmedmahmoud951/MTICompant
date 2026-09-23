@@ -39,18 +39,106 @@ public class BackblazeB2StorageService : IMediaStorageService, IB2StorageService
         _s3Client = new AmazonS3Client(credentials, config);
     }
 
+    private static string SanitizeFileName(string fileName)
+    {
+        var clean = Path.GetFileName(fileName) ?? "file";
+        var ext = Path.GetExtension(clean);
+        if (ext.Length > 16) ext = "";
+
+        // B2/S3 SigV4 rejects non-ASCII / special chars in object keys ("Seed signature is invalid")
+        var nameOnly = Path.GetFileNameWithoutExtension(clean);
+        var ascii = new string(nameOnly
+            .Select(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.' ? ch : '_')
+            .ToArray())
+            .Trim('_', '.');
+
+        if (string.IsNullOrWhiteSpace(ascii) || ascii.Length < 2)
+            ascii = "file";
+
+        if (ascii.Length > 80)
+            ascii = ascii[..80];
+
+        var safeExt = new string((ext ?? "")
+            .Select(ch => char.IsAsciiLetterOrDigit(ch) || ch == '.' ? ch : '_')
+            .ToArray());
+
+        return $"{ascii}_{Guid.NewGuid():N}{safeExt}";
+    }
+
+    public string BuildDocumentObjectKey(Guid projectId, Guid documentId, Guid versionId, string fileName)
+    {
+        var safeFileName = SanitizeFileName(fileName);
+        return $"projects/{projectId}/documents/{documentId}/versions/{versionId}/{safeFileName}";
+    }
+
+    public string BuildAssetObjectKey(Guid projectId, Guid assetId, string fileName)
+    {
+        var safeFileName = SanitizeFileName(fileName);
+        return $"projects/{projectId}/assets/{assetId}/{safeFileName}";
+    }
+
+    public static string ComputeSha256(Stream stream)
+    {
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var hashBytes = sha256.ComputeHash(stream);
+        if (stream.CanSeek) stream.Position = 0;
+        return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+    }
+
+    public string BuildChatObjectKey(Guid conversationId, Guid messageId, Guid attachmentId, string fileName)
+    {
+        var safeFileName = SanitizeFileName(fileName);
+        return $"chat/{conversationId}/{messageId}/{attachmentId}/{safeFileName}";
+    }
+
     public string BuildObjectKey(string entityType, Guid? projectId, Guid? siteId, Guid? entityId, Guid mediaId, string fileName)
     {
         var cleanFileName = Path.GetFileName(fileName).Replace(" ", "_");
         return entityType.ToLowerInvariant() switch
         {
+            "document" or "documentversion" => $"projects/{projectId}/documents/{entityId}/versions/{mediaId}/{cleanFileName}",
+            "asset" or "companyasset" => $"projects/{projectId}/assets/{entityId}/{cleanFileName}",
+            "chat" or "conversation" => $"chat/{entityId}/media/{mediaId}/{cleanFileName}",
             "projectdata" or "data" => $"projects/{projectId}/sites/{siteId}/data/{entityId}/media/{mediaId}/{cleanFileName}",
             "task" or "taskitem" => $"tasks/{entityId}/attachments/{mediaId}/{cleanFileName}",
-            "chat" or "conversation" => $"chat/{entityId}/media/{mediaId}/{cleanFileName}",
             "user" or "profile" => $"users/{entityId}/profile/{mediaId}/{cleanFileName}",
             _ => $"general/{entityType.ToLowerInvariant()}/{entityId}/{mediaId}/{cleanFileName}"
         };
     }
+
+    public async Task<(string ObjectKey, string Checksum, long FileSize)> UploadStreamAsync(
+        Stream stream,
+        string objectKey,
+        string contentType,
+        CancellationToken cancellationToken = default)
+    {
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms, cancellationToken);
+        ms.Position = 0;
+
+        string checksum;
+        using (var sha256 = System.Security.Cryptography.SHA256.Create())
+        {
+            var hashBytes = sha256.ComputeHash(ms);
+            checksum = BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+        }
+        ms.Position = 0;
+
+        var putRequest = new PutObjectRequest
+        {
+            BucketName = _bucketName,
+            Key = objectKey,
+            InputStream = ms,
+            ContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType,
+            // Required for Backblaze B2 S3-compatible API — avoids "Seed signature is invalid"
+            DisablePayloadSigning = true,
+            UseChunkEncoding = false
+        };
+
+        await _s3Client.PutObjectAsync(putRequest, cancellationToken);
+        return (objectKey, checksum, ms.Length);
+    }
+
 
     public Task<string> GeneratePreSignedUploadUrlAsync(string objectKey, string contentType, TimeSpan expiry, CancellationToken cancellationToken = default)
     {

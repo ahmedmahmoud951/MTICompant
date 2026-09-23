@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MTI.ProjectManagement.Application.Contracts;
@@ -8,7 +8,7 @@ namespace MTI.ProjectManagement.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Admin,SystemAdmin")]
+[Authorize(Roles = "Admin,SystemAdmin,SuperAdmin")]
 public class AuditController : ControllerBase
 {
     private readonly IAppDbContext _dbContext;
@@ -18,6 +18,7 @@ public class AuditController : ControllerBase
         _dbContext = dbContext;
     }
 
+    /// <summary>AUDIT-01: Read-only audit log â€” normal users cannot delete or modify.</summary>
     [HttpGet]
     public async Task<ActionResult> GetLogs(
         [FromQuery] AuditLogFilterParams filter,
@@ -36,6 +37,13 @@ public class AuditController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(filter.EntityId))
             query = query.Where(a => a.EntityId == filter.EntityId);
+
+        // AUDIT-01 additions: project and site scope
+        if (filter.ProjectId.HasValue)
+            query = query.Where(a => a.ProjectId == filter.ProjectId.Value);
+
+        if (filter.SiteId.HasValue)
+            query = query.Where(a => a.SiteId == filter.SiteId.Value);
 
         if (filter.DateFrom.HasValue)
             query = query.Where(a => a.CreatedAt >= filter.DateFrom.Value);
@@ -69,10 +77,13 @@ public class AuditController : ControllerBase
                 a.NewValues,
                 a.IpAddress,
                 a.UserAgent,
-                a.CreatedAt
+                a.CreatedAt,
+                a.ProjectId,
+                a.SiteId
             ))
             .ToListAsync(cancellationToken);
 
         return Ok(new { items = logs, totalCount, page = filter.Page, pageSize = filter.PageSize });
     }
 }
+

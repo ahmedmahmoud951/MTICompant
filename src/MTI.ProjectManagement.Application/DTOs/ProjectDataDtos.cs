@@ -7,7 +7,7 @@ public record CreateDataSheetDto(string Name, string? Description, string Header
 
 public record CreateProjectDataDto(
     Guid ProjectId,
-    Guid SiteId,
+    Guid? SiteId,
     string Title,
     string Description,
     bool SubmitDirectly = false,

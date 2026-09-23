@@ -36,8 +36,14 @@ export const taskService = {
   },
 
   async updateStatus(taskId: string, status: string, notes?: string): Promise<boolean> {
-    const res = await apiClient.put(`/api/tasks/${taskId}/status`, { status, notes });
-    return res.success;
+    const res = await apiClient.put(`/api/tasks/${taskId}/status`, {
+      status,
+      notes: notes || null
+    });
+    if (!res.success) {
+      throw new Error(res.message || 'Failed to update task status');
+    }
+    return true;
   },
 
   async updateTask(

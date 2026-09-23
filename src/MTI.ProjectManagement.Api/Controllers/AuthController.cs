@@ -111,6 +111,8 @@ public class AuthController : ControllerBase
         var (accessToken, expiresAt) = _tokenService.GenerateAccessToken(user, roles, permissions);
         var refreshTokenValue = _tokenService.GenerateRefreshToken();
 
+        // Concurrent sessions allowed: do NOT revoke other devices' refresh tokens.
+        // Each login gets its own refresh token so the same Admin user can stay open on multiple devices.
         var refreshToken = new RefreshToken
         {
             UserId = user.Id,
@@ -228,10 +230,10 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("logout")]
-    [Authorize]
-    public async Task<ActionResult<ApiResponse<bool>>> Logout([FromBody] RefreshTokenRequest request)
+    [AllowAnonymous]
+    public async Task<ActionResult<ApiResponse<bool>>> Logout([FromBody] RefreshTokenRequest? request)
     {
-        if (!string.IsNullOrWhiteSpace(request.RefreshToken))
+        if (!string.IsNullOrWhiteSpace(request?.RefreshToken))
         {
             var token = await _context.RefreshTokens.FirstOrDefaultAsync(t => t.Token == request.RefreshToken);
             if (token != null && !token.IsRevoked)
@@ -243,7 +245,10 @@ public class AuthController : ControllerBase
         }
 
         var userId = _currentUserService.UserId;
-        await _auditService.LogAsync("Logout", "User", userId?.ToString());
+        if (userId.HasValue)
+        {
+            await _auditService.LogAsync("Logout", "User", userId.Value.ToString());
+        }
 
         return Ok(ApiResponse<bool>.Ok(true, "Logged out successfully."));
     }
@@ -329,3 +334,4 @@ public class AuthController : ControllerBase
         return Ok(ApiResponse<bool>.Ok(true, "Password changed successfully. Please log in again."));
     }
 }
+

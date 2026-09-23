@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using MTI.ProjectManagement.Api.Helpers;
 using MTI.ProjectManagement.Application.Contracts;
 using MTI.ProjectManagement.Application.DTOs;
 using MTI.ProjectManagement.Domain.Entities;
@@ -40,18 +41,32 @@ public class TasksController : ControllerBase
         [FromBody] CreateTaskDto dto,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
+
+        if (string.IsNullOrWhiteSpace(dto.Title))
+            return BadRequest(new { message = "Task title is required." });
+
+        var projectExists = await _dbContext.Projects.AnyAsync(p => p.Id == dto.ProjectId, cancellationToken: cancellationToken);
+        if (!projectExists) return BadRequest(new { message = "Project not found." });
+
+        if (dto.AssignedToUserId.HasValue)
+        {
+            var assigneeOk = await _dbContext.Users.AnyAsync(
+                u => u.Id == dto.AssignedToUserId.Value && u.IsActive && !u.IsDeleted, cancellationToken: cancellationToken);
+            if (!assigneeOk) return BadRequest(new { message = "Assigned user is invalid or inactive." });
+        }
 
         var task = new TaskItem
         {
             ProjectId = dto.ProjectId,
             SiteId = dto.SiteId,
-            Title = dto.Title,
-            Description = dto.Description,
+            Title = dto.Title.Trim(),
+            Description = dto.Description?.Trim() ?? string.Empty,
             Priority = dto.Priority,
-            Status = TaskItemStatus.ToDo,
+            Status = dto.Status ?? TaskItemStatus.ToDo,
             AssignedToUserId = dto.AssignedToUserId,
+            AssignedToTeamId = dto.AssignedToTeamId,
+            ProgressPercentage = dto.ProgressPercentage ?? 0,
             StartAt = dto.StartAt,
             DueAt = dto.DueAt,
             CreatedBy = userId
@@ -66,6 +81,40 @@ public class TasksController : ControllerBase
                 AssignedBy = userId,
                 AssignedAt = DateTime.UtcNow
             });
+
+            // Ensure assignee can see the project
+            var isMember = await _dbContext.ProjectMembers.AnyAsync(
+                pm => pm.ProjectId == dto.ProjectId && pm.UserId == dto.AssignedToUserId.Value, cancellationToken: cancellationToken);
+            if (!isMember)
+            {
+                _dbContext.ProjectMembers.Add(new ProjectMember
+                {
+                    ProjectId = dto.ProjectId,
+                    UserId = dto.AssignedToUserId.Value,
+                    Role = "Engineer",
+                    JoinedAt = DateTime.UtcNow
+                });
+            }
+
+            // If task has a site, also assign engineer to that site
+            if (dto.SiteId.HasValue)
+            {
+                var hasSite = await _dbContext.SiteAssignments.AnyAsync(
+                    sa => sa.SiteId == dto.SiteId.Value && sa.UserId == dto.AssignedToUserId.Value && sa.RemovedAt == null,
+                    cancellationToken: cancellationToken);
+                if (!hasSite)
+                {
+                    _dbContext.SiteAssignments.Add(new SiteAssignment
+                    {
+                        SiteId = dto.SiteId.Value,
+                        UserId = dto.AssignedToUserId.Value,
+                        Role = "Engineer",
+                        IsPrimary = false,
+                        AssignedAt = DateTime.UtcNow,
+                        AssignedBy = userId
+                    });
+                }
+            }
         }
 
         task.StatusHistory.Add(new TaskStatusHistory
@@ -100,30 +149,28 @@ public class TasksController : ControllerBase
             task.Id.ToString(),
             null,
             new { task.Title, task.ProjectId, task.SiteId, task.AssignedToUserId, task.Priority },
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
-        // SignalR & Notifications
+        // SignalR & Notifications — deliver to assignee group user:{id}
         if (dto.AssignedToUserId.HasValue)
         {
-            await _notificationService.SendNotificationAsync(
-                dto.AssignedToUserId.Value,
-                NotificationType.TaskAssigned,
-                "New Task Assigned",
-                $"You have been assigned to task: '{task.Title}'",
-                "Task",
-                task.Id.ToString(),
-                cancellationToken);
+            await _notificationService.NotifyTaskAssignedAsync(
+                task.Id, task.Title, dto.AssignedToUserId.Value, cancellationToken);
 
-            await _notificationService.BroadcastToUserAsync(dto.AssignedToUserId.Value, "TaskAssigned", new { taskId = task.Id, title = task.Title }, cancellationToken);
+            await _notificationService.BroadcastToUserAsync(
+                dto.AssignedToUserId.Value,
+                "TaskAssigned",
+                new { taskId = task.Id, title = task.Title, projectId = task.ProjectId },
+                cancellationToken: cancellationToken);
         }
 
         if (task.SiteId.HasValue)
         {
-            await _notificationService.BroadcastToSiteAsync(task.SiteId.Value, "TaskCreated", new { taskId = task.Id, title = task.Title }, cancellationToken);
+            await _notificationService.BroadcastToSiteAsync(task.SiteId.Value, "TaskCreated", new { taskId = task.Id, title = task.Title }, cancellationToken: cancellationToken);
         }
-        await _notificationService.BroadcastGlobalAsync("TaskCreated", new { taskId = task.Id, title = task.Title }, cancellationToken);
+        await _notificationService.BroadcastGlobalAsync("TaskCreated", new { taskId = task.Id, title = task.Title }, cancellationToken: cancellationToken);
 
-        return await GetById(task.Id, cancellationToken);
+        return await GetById(task.Id, cancellationToken: cancellationToken);
     }
 
     [HttpGet]
@@ -131,20 +178,22 @@ public class TasksController : ControllerBase
         [FromQuery] TaskFilterParams filter,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
-        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin");
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("ProjectManager");
 
         var query = _dbContext.Tasks
             .AsNoTracking()
             .Where(t => !t.IsDeleted);
 
-        // Scoping: If engineer, can view tasks assigned to them OR within authorized sites
+        // Engineers: tasks assigned to them OR within authorized sites
         if (!isAdmin)
         {
-            var authorizedSiteIds = await _resourceAuthorization.GetAuthorizedSiteIdsAsync(userId, cancellationToken);
-            query = query.Where(t => t.AssignedToUserId == userId || (t.SiteId.HasValue && authorizedSiteIds.Contains(t.SiteId.Value)));
+            var authorizedSiteIds = await _resourceAuthorization.GetAuthorizedSiteIdsAsync(userId, cancellationToken: cancellationToken);
+            query = query.Where(t =>
+                t.AssignedToUserId == userId
+                || (t.SiteId.HasValue && authorizedSiteIds.Contains(t.SiteId.Value))
+                || t.Assignments.Any(a => a.UserId == userId));
         }
 
         if (filter.ProjectId.HasValue) query = query.Where(t => t.ProjectId == filter.ProjectId.Value);
@@ -164,12 +213,15 @@ public class TasksController : ControllerBase
             query = query.Where(t => t.DueAt.HasValue && t.DueAt < now && t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled);
         }
 
+        var page = filter.Page < 1 ? 1 : filter.Page;
+        var pageSize = filter.PageSize < 1 ? 50 : Math.Min(filter.PageSize, 200);
+
         var totalCount = await query.CountAsync(cancellationToken);
 
         var list = await query
             .OrderByDescending(t => t.CreatedAt)
-            .Skip((filter.Page - 1) * filter.PageSize)
-            .Take(filter.PageSize)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(t => new
             {
                 t.Id,
@@ -183,13 +235,16 @@ public class TasksController : ControllerBase
                 t.DueAt,
                 t.AssignedToUserId,
                 AssignedToName = t.AssignedToUser != null ? t.AssignedToUser.FirstName + " " + t.AssignedToUser.LastName : null,
+                t.AssignedToTeamId,
+                t.ProgressPercentage,
+                t.CreatedBy,
                 t.CreatedAt
             })
             .ToListAsync(cancellationToken);
 
         var items = list.Select(t =>
         {
-            var isOverdue = t.DueAt.HasValue && t.DueAt < now && t.Status != TaskItemStatus.Completed && t.Status != TaskItemStatus.Cancelled;
+            var (isOverdue, remaining, overdue) = ComputeDeadline(t.DueAt, t.Status, now);
             return new TaskSummaryDto(
                 t.Id,
                 t.ProjectId,
@@ -200,46 +255,56 @@ public class TasksController : ControllerBase
                 t.Priority,
                 t.Status,
                 isOverdue,
+                remaining,
+                overdue,
                 t.AssignedToUserId,
                 t.AssignedToName,
+                t.AssignedToTeamId,
+                t.ProgressPercentage,
                 t.DueAt,
+                t.CreatedBy,
                 t.CreatedAt
             );
         }).ToList();
 
-        return Ok(new { items, totalCount, page = filter.Page, pageSize = filter.PageSize });
+        return Ok(new { items, totalCount, page, pageSize });
     }
 
     [HttpGet("{id}")]
     public async Task<ActionResult<TaskDetailDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var task = await _dbContext.Tasks
             .AsNoTracking()
             .Include(t => t.Project)
             .Include(t => t.Site)
             .Include(t => t.AssignedToUser)
+            .Include(t => t.Assignments)
             .Include(t => t.Comments).ThenInclude(c => c.Author)
             .Include(t => t.Attachments).ThenInclude(a => a.MediaFile)
             .Include(t => t.StatusHistory)
-            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken: cancellationToken);
 
         if (task == null) return NotFound(new { message = "Task not found." });
 
-        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin");
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("ProjectManager");
         if (!isAdmin && task.AssignedToUserId != userId)
         {
-            if (task.SiteId.HasValue)
+            var viaAssignment = task.Assignments?.Any(a => a.UserId == userId) == true;
+            if (!viaAssignment && task.SiteId.HasValue)
             {
-                var canAccess = await _resourceAuthorization.CanAccessSiteAsync(userId, task.SiteId.Value, cancellationToken);
+                var canAccess = await _resourceAuthorization.CanAccessSiteAsync(userId, task.SiteId.Value, cancellationToken: cancellationToken);
                 if (!canAccess) return Forbid();
+            }
+            else if (!viaAssignment && !task.SiteId.HasValue)
+            {
+                return Forbid();
             }
         }
 
         var now = DateTime.UtcNow;
-        var isOverdue = task.DueAt.HasValue && task.DueAt < now && task.Status != TaskItemStatus.Completed && task.Status != TaskItemStatus.Cancelled;
+        var (isOverdue, remaining, overdue) = ComputeDeadline(task.DueAt, task.Status, now);
 
         var comments = task.Comments.OrderBy(c => c.CreatedAt).Select(c => new TaskCommentDto(
             c.Id,
@@ -254,7 +319,7 @@ public class TasksController : ControllerBase
         {
             if (att.MediaFile != null && !att.MediaFile.IsDeleted)
             {
-                var downloadUrl = await _mediaStorage.GeneratePreSignedDownloadUrlAsync(att.MediaFile.ObjectKey, TimeSpan.FromHours(2), cancellationToken);
+                var downloadUrl = await _mediaStorage.GeneratePreSignedDownloadUrlAsync(att.MediaFile.ObjectKey, TimeSpan.FromHours(2), cancellationToken: cancellationToken);
                 attachments.Add(new TaskAttachmentDto(
                     att.Id,
                     att.MediaFileId,
@@ -272,7 +337,7 @@ public class TasksController : ControllerBase
         var userIds = task.StatusHistory.Select(h => h.ChangedBy).Distinct().ToList();
         var usersMap = await _dbContext.Users.AsNoTracking()
             .Where(u => userIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}", cancellationToken);
+            .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}", cancellationToken: cancellationToken);
 
         foreach (var h in task.StatusHistory.OrderBy(h => h.ChangedAt))
         {
@@ -299,12 +364,17 @@ public class TasksController : ControllerBase
             task.Priority,
             task.Status,
             isOverdue,
+            remaining,
+            overdue,
             task.AssignedToUserId,
             task.AssignedToUser != null ? $"{task.AssignedToUser.FirstName} {task.AssignedToUser.LastName}" : null,
+            task.AssignedToTeamId,
+            task.ProgressPercentage,
             task.StartAt,
             task.DueAt,
             task.CompletedAt,
-            null, // CompletedBy
+            task.Status == TaskItemStatus.Completed ? task.UpdatedBy : null,
+            task.CreatedBy,
             comments,
             attachments,
             statusHistory
@@ -318,13 +388,12 @@ public class TasksController : ControllerBase
         [FromBody] UpdateTaskDto dto,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
         var task = await _dbContext.Tasks
             .Include(t => t.Assignments)
             .Include(t => t.StatusHistory)
-            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken);
+            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken: cancellationToken);
 
         if (task == null) return NotFound();
 
@@ -336,6 +405,8 @@ public class TasksController : ControllerBase
         task.Priority = dto.Priority;
         task.StartAt = dto.StartAt;
         task.DueAt = dto.DueAt;
+        if (dto.AssignedToTeamId.HasValue) task.AssignedToTeamId = dto.AssignedToTeamId;
+        if (dto.ProgressPercentage.HasValue) task.ProgressPercentage = dto.ProgressPercentage.Value;
         task.UpdatedBy = userId;
         task.UpdatedAt = DateTime.UtcNow;
 
@@ -352,14 +423,22 @@ public class TasksController : ControllerBase
                     AssignedAt = DateTime.UtcNow
                 });
 
-                await _notificationService.SendNotificationAsync(
-                    dto.AssignedToUserId.Value,
-                    NotificationType.TaskAssigned,
-                    "Task Reassigned",
-                    $"You have been assigned to task: '{task.Title}'",
-                    "Task",
-                    task.Id.ToString(),
-                    cancellationToken);
+                await _notificationService.NotifyTaskAssignedAsync(
+                    task.Id, task.Title, dto.AssignedToUserId.Value, cancellationToken);
+
+                // Ensure project membership so assignee sees the project
+                var isMember = await _dbContext.ProjectMembers.AnyAsync(
+                    pm => pm.ProjectId == task.ProjectId && pm.UserId == dto.AssignedToUserId.Value, cancellationToken: cancellationToken);
+                if (!isMember)
+                {
+                    _dbContext.ProjectMembers.Add(new ProjectMember
+                    {
+                        ProjectId = task.ProjectId,
+                        UserId = dto.AssignedToUserId.Value,
+                        Role = "Engineer",
+                        JoinedAt = DateTime.UtcNow
+                    });
+                }
             }
         }
 
@@ -385,25 +464,33 @@ public class TasksController : ControllerBase
             task.Id.ToString(),
             new { OldStatus = oldStatus, OldAssignedTo = oldAssignedTo },
             new { task.Title, task.Status, task.AssignedToUserId },
-            cancellationToken);
+            cancellationToken: cancellationToken);
+
+        if (dto.AssignedToUserId.HasValue && dto.AssignedToUserId != oldAssignedTo)
+        {
+            await _notificationService.BroadcastToUserAsync(
+                dto.AssignedToUserId.Value,
+                "TaskAssigned",
+                new { taskId = task.Id, title = task.Title, projectId = task.ProjectId },
+                cancellationToken: cancellationToken);
+        }
 
         if (task.AssignedToUserId.HasValue)
         {
-            await _notificationService.BroadcastToUserAsync(task.AssignedToUserId.Value, "TaskUpdated", new { taskId = task.Id, title = task.Title }, cancellationToken);
+            await _notificationService.BroadcastToUserAsync(task.AssignedToUserId.Value, "TaskUpdated", new { taskId = task.Id, title = task.Title }, cancellationToken: cancellationToken);
         }
-        await _notificationService.BroadcastGlobalAsync("TaskUpdated", new { taskId = task.Id, title = task.Title }, cancellationToken);
+        await _notificationService.BroadcastGlobalAsync("TaskUpdated", new { taskId = task.Id, title = task.Title }, cancellationToken: cancellationToken);
 
-        return await GetById(task.Id, cancellationToken);
+        return await GetById(task.Id, cancellationToken: cancellationToken);
     }
 
     [HttpDelete("{id}")]
     [Authorize(Roles = "Admin,SystemAdmin,ProjectManager")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
-        var task = await _dbContext.Tasks.FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken);
+        var task = await _dbContext.Tasks.FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken: cancellationToken);
         if (task == null) return NotFound();
 
         task.IsDeleted = true;
@@ -420,37 +507,51 @@ public class TasksController : ControllerBase
             task.Id.ToString(),
             new { task.Title, task.Status },
             null,
-            cancellationToken);
+            cancellationToken: cancellationToken);
 
-        await _notificationService.BroadcastGlobalAsync("TaskUpdated", new { taskId = task.Id, deleted = true }, cancellationToken);
+        await _notificationService.BroadcastGlobalAsync("TaskUpdated", new { taskId = task.Id, deleted = true }, cancellationToken: cancellationToken);
 
         return Ok(new { success = true });
     }
 
+    [HttpPut("{id}/status")]
     [HttpPost("{id}/status")]
     public async Task<IActionResult> UpdateStatus(
         Guid id,
-        [FromBody] CompleteTaskDto dto,
-        [FromQuery] TaskItemStatus targetStatus,
+        [FromBody] UpdateTaskStatusDto dto,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
+
+        if (dto == null)
+            return BadRequest(new { message = "Status payload is required." });
 
         var task = await _dbContext.Tasks
             .Include(t => t.StatusHistory)
             .Include(t => t.Attachments)
-            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken);
+            .Include(t => t.Assignments)
+            .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken: cancellationToken);
 
-        if (task == null) return NotFound();
+        if (task == null) return NotFound(new { message = "Task not found." });
 
-        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin");
-        if (!isAdmin && task.AssignedToUserId != userId)
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("ProjectManager");
+        var isAssignee =
+            task.AssignedToUserId == userId
+            || task.Assignments.Any(a => a.UserId == userId);
+
+        if (!isAdmin && !isAssignee)
         {
             return Forbid();
         }
 
+        var targetStatus = dto.Status;
         var oldStatus = task.Status;
+
+        if (oldStatus == targetStatus)
+        {
+            return Ok(new { success = true, status = task.Status.ToString(), unchanged = true });
+        }
+
         task.Status = targetStatus;
         task.UpdatedBy = userId;
         task.UpdatedAt = DateTime.UtcNow;
@@ -459,7 +560,6 @@ public class TasksController : ControllerBase
         {
             task.CompletedAt = DateTime.UtcNow;
 
-            // Link completion attachments if provided
             if (dto.AttachmentMediaIds != null)
             {
                 foreach (var mediaId in dto.AttachmentMediaIds)
@@ -475,25 +575,10 @@ public class TasksController : ControllerBase
                     }
                 }
             }
-
-            // Notify Admins
-            var adminUserIds = await _dbContext.UserRoles
-                .Where(ur => ur.Role.Name == "Admin" || ur.Role.Name == "SystemAdmin" || ur.Role.Name == "ProjectManager")
-                .Select(ur => ur.UserId)
-                .Distinct()
-                .ToListAsync(cancellationToken);
-
-            foreach (var adminId in adminUserIds)
-            {
-                await _notificationService.SendNotificationAsync(
-                    adminId,
-                    NotificationType.TaskCompleted,
-                    "Task Completed",
-                    $"Task '{task.Title}' has been marked completed.",
-                    "Task",
-                    task.Id.ToString(),
-                    cancellationToken);
-            }
+        }
+        else if (oldStatus == TaskItemStatus.Completed)
+        {
+            task.CompletedAt = null;
         }
 
         _dbContext.TaskStatusHistories.Add(new TaskStatusHistory
@@ -501,7 +586,7 @@ public class TasksController : ControllerBase
             TaskItemId = task.Id,
             OldStatus = oldStatus,
             NewStatus = targetStatus,
-            Reason = dto.CompletionComment ?? $"Status changed to {targetStatus}",
+            Reason = dto.Notes ?? $"Status changed from {oldStatus} to {targetStatus}",
             ChangedBy = userId,
             ChangedAt = DateTime.UtcNow
         });
@@ -513,14 +598,71 @@ public class TasksController : ControllerBase
             "TaskItem",
             task.Id.ToString(),
             new { Status = oldStatus },
-            new { Status = targetStatus, dto.CompletionComment },
-            cancellationToken);
+            new { Status = targetStatus, dto.Notes },
+            cancellationToken: cancellationToken);
+
+        var payload = new
+        {
+            taskId = task.Id,
+            title = task.Title,
+            status = targetStatus.ToString(),
+            oldStatus = oldStatus.ToString(),
+            projectId = task.ProjectId
+        };
+
+        // Notify admins (+ assignee on completion) — exclude actor
+        var adminUserIds = await _dbContext.UserRoles
+            .Where(ur => ur.Role.Name == "Admin" || ur.Role.Name == "SystemAdmin" || ur.Role.Name == "ProjectManager")
+            .Select(ur => ur.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (targetStatus == TaskItemStatus.Completed)
+        {
+            var notifyIds = adminUserIds.ToList();
+            if (task.AssignedToUserId.HasValue)
+                notifyIds.Add(task.AssignedToUserId.Value);
+
+            await _notificationService.NotifyTaskCompletedAsync(
+                task.Id, task.Title, notifyIds.Distinct(), userId, cancellationToken);
+        }
+        else
+        {
+            foreach (var adminId in adminUserIds.Where(aid => aid != userId))
+            {
+                await _notificationService.SendNotificationAsync(
+                    adminId,
+                    NotificationType.TaskUpdated,
+                    "Task Status Updated",
+                    $"Task '{task.Title}' changed from {oldStatus} to {targetStatus}.",
+                    "Task",
+                    task.Id.ToString(),
+                    cancellationToken: cancellationToken);
+            }
+        }
+
+        await _notificationService.BroadcastToAdminsAsync("TaskStatusChanged", payload, cancellationToken: cancellationToken);
+        await _notificationService.BroadcastToAdminsAsync("AdminStatsUpdated", new { }, cancellationToken: cancellationToken);
+        await _notificationService.BroadcastGlobalAsync("TaskStatusChanged", payload, cancellationToken: cancellationToken);
+        await _notificationService.BroadcastGlobalAsync("TaskUpdated", payload, cancellationToken: cancellationToken);
 
         if (task.SiteId.HasValue)
         {
-            await _notificationService.BroadcastToSiteAsync(task.SiteId.Value, targetStatus == TaskItemStatus.Completed ? "TaskCompleted" : "TaskUpdated", new { taskId = task.Id, title = task.Title, status = targetStatus.ToString() }, cancellationToken);
+            await _notificationService.BroadcastToSiteAsync(
+                task.SiteId.Value,
+                targetStatus == TaskItemStatus.Completed ? "TaskCompleted" : "TaskUpdated",
+                payload,
+                cancellationToken: cancellationToken);
         }
-        await _notificationService.BroadcastGlobalAsync("TaskStatusChanged", new { taskId = task.Id, status = targetStatus.ToString() }, cancellationToken);
+
+        if (task.AssignedToUserId.HasValue && task.AssignedToUserId.Value != userId)
+        {
+            await _notificationService.BroadcastToUserAsync(
+                task.AssignedToUserId.Value,
+                "TaskStatusChanged",
+                payload,
+                cancellationToken: cancellationToken);
+        }
 
         return Ok(new { success = true, status = task.Status.ToString() });
     }
@@ -531,10 +673,9 @@ public class TasksController : ControllerBase
         [FromBody] string content,
         CancellationToken cancellationToken)
     {
-        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
 
-        var task = await _dbContext.Tasks.FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken);
+        var task = await _dbContext.Tasks.FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted, cancellationToken: cancellationToken);
         if (task == null) return NotFound();
 
         var comment = new TaskComment
@@ -550,4 +691,23 @@ public class TasksController : ControllerBase
 
         return Ok(new { success = true, commentId = comment.Id });
     }
+
+    /// <summary>
+    /// TASK-01: compute RemainingTime / OverdueTime without changing status when due date passes.
+    /// </summary>
+    private static (bool IsOverdue, TimeSpan? RemainingTime, TimeSpan? OverdueTime) ComputeDeadline(
+        DateTime? dueAt,
+        TaskItemStatus status,
+        DateTime now)
+    {
+        if (!dueAt.HasValue || status == TaskItemStatus.Completed || status == TaskItemStatus.Cancelled)
+            return (false, null, null);
+
+        if (dueAt.Value >= now)
+            return (false, dueAt.Value - now, null);
+
+        return (true, null, now - dueAt.Value);
+    }
 }
+
+

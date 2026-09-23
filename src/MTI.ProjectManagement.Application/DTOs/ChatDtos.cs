@@ -33,6 +33,13 @@ public record MessageReadStateDto(
     DateTime ReadAt
 );
 
+public record MessageReceiptDto(
+    Guid UserId,
+    string UserName,
+    DateTime? DeliveredAt,
+    DateTime? ReadAt
+);
+
 public record MessageDto(
     Guid Id,
     Guid ConversationId,
@@ -44,7 +51,9 @@ public record MessageDto(
     DateTime CreatedAt,
     List<MessageAttachmentDto> Attachments,
     List<MessageReactionDto> Reactions,
-    List<MessageReadStateDto> ReadStates
+    List<MessageReadStateDto> ReadStates,
+    string? ClientMessageId = null,
+    List<MessageReceiptDto>? Receipts = null
 );
 
 public record ConversationSummaryDto(
@@ -56,15 +65,25 @@ public record ConversationSummaryDto(
     int UnreadCount,
     MessageDto? LastMessage,
     List<ConversationMemberDto> Members,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    string? Type = null
 );
 
 public record CreateDirectConversationDto(
     Guid OtherUserId
 );
 
+public record CreateProjectConversationDto(
+    Guid ProjectId
+);
+
+public record CreateSiteConversationDto(
+    Guid SiteId
+);
+
 public record SendMessageDto(
     string Content,
+    string? ClientMessageId = null,
     Guid? ReplyToMessageId = null,
     List<Guid>? AttachmentMediaIds = null
 );

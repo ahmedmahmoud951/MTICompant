@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using MTI.ProjectManagement.Domain.Common;
 using MTI.ProjectManagement.Domain.Enums;
 
@@ -9,15 +10,31 @@ public class Project : FullAuditedEntity
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string ClientName { get; set; } = string.Empty;
+    public Guid? ClientId { get; set; }
+    public ProjectPriority Priority { get; set; } = ProjectPriority.Medium;
     public ProjectStatus Status { get; set; } = ProjectStatus.Planning;
+    public ProjectType Type { get; set; } = ProjectType.GeneralEngineering;
+    public decimal ProgressPercentage { get; set; } = 0;
     public DateTime? StartDate { get; set; }
     public DateTime? EndDate { get; set; }
+    /// <summary>Optional cover image (URL or data URL) shown on project cards.</summary>
+    public string? CoverImageUrl { get; set; }
+    [NotMapped]
+    public DateTime? PlannedEndDate { get => EndDate; set => EndDate = value; }
+    public DateTime? ActualEndDate { get; set; }
+    public bool IsArchived { get; set; } = false;
+
 
     // Navigation
     public ICollection<Site> Sites { get; set; } = new List<Site>();
     public ICollection<ProjectMember> Members { get; set; } = new List<ProjectMember>();
+    public ICollection<ProjectAssignment> Assignments { get; set; } = new List<ProjectAssignment>();
+    public ICollection<ProjectMilestone> Milestones { get; set; } = new List<ProjectMilestone>();
     public ICollection<ProjectDataRecord> DataRecords { get; set; } = new List<ProjectDataRecord>();
     public ICollection<TaskItem> Tasks { get; set; } = new List<TaskItem>();
+    public ICollection<Document> Documents { get; set; } = new List<Document>();
+    public ICollection<ProjectRisk> Risks { get; set; } = new List<ProjectRisk>();
+    public ICollection<ProjectIssue> Issues { get; set; } = new List<ProjectIssue>();
 }
 
 public class Site : FullAuditedEntity
@@ -37,7 +54,10 @@ public class Site : FullAuditedEntity
     public ICollection<SiteAssignment> Assignments { get; set; } = new List<SiteAssignment>();
     public ICollection<ProjectDataRecord> DataRecords { get; set; } = new List<ProjectDataRecord>();
     public ICollection<TaskItem> Tasks { get; set; } = new List<TaskItem>();
+    public ICollection<Document> Documents { get; set; } = new List<Document>();
+    public ICollection<ProjectIssue> Issues { get; set; } = new List<ProjectIssue>();
 }
+
 
 public class SiteAssignment : BaseEntity
 {

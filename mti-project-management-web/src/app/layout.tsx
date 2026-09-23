@@ -1,6 +1,7 @@
 import '@/styles/globals.css';
 import { Metadata } from 'next';
 import { Sora, Manrope, Cairo } from 'next/font/google';
+import { I18nProvider } from '@/components/I18nProvider';
 
 const display = Sora({
   subsets: ['latin'],
@@ -32,9 +33,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
+    // I18N-01: Arabic-first (ar/rtl). Direction updated dynamically by LanguageSwitcher.
     <html lang="ar" dir="rtl" className={`${display.variable} ${body.variable} ${arabic.variable}`}>
       <body className="bg-[#0b1524] text-[#e8eef8] antialiased font-[family-name:var(--font-body)]">
-        {children}
+        <I18nProvider>{children}</I18nProvider>
       </body>
     </html>
   );

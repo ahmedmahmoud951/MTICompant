@@ -1,0 +1,240 @@
+{
+  "common": {
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "delete": "حذف",
+    "edit": "تعديل",
+    "create": "إنشاء",
+    "view": "عرض",
+    "search": "بحث",
+    "filter": "تصفية",
+    "export": "تصدير",
+    "print": "طباعة",
+    "confirm": "تأكيد",
+    "close": "إغلاق",
+    "back": "رجوع",
+    "next": "التالي",
+    "previous": "السابق",
+    "loading": "جاري التحميل...",
+    "noData": "لا توجد بيانات",
+    "error": "حدث خطأ",
+    "success": "تمت العملية بنجاح",
+    "required": "هذا الحقل مطلوب",
+    "optional": "اختياري",
+    "actions": "الإجراءات",
+    "status": "الحالة",
+    "name": "الاسم",
+    "description": "الوصف",
+    "date": "التاريخ",
+    "createdAt": "تاريخ الإنشاء",
+    "updatedAt": "تاريخ التحديث",
+    "yes": "نعم",
+    "no": "لا",
+    "all": "الكل",
+    "unknown": "غير معروف",
+    "active": "نشط",
+    "inactive": "غير نشط"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "projects": "المشاريع",
+    "sites": "المواقع",
+    "tasks": "المهام",
+    "documents": "المستندات",
+    "chat": "المحادثات",
+    "technicalOffice": "المكتب الفني",
+    "accounting": "المحاسبة",
+    "operations": "العمليات",
+    "maintenance": "الصيانة",
+    "procurement": "المشتريات",
+    "reports": "التقارير",
+    "settings": "الإعدادات",
+    "users": "المستخدمون",
+    "admin": "الإدارة",
+    "notifications": "الإشعارات",
+    "profile": "الملف الشخصي",
+    "logout": "تسجيل الخروج",
+    "materials": "المواد",
+    "assets": "الأصول",
+    "issues": "المشكلات",
+    "risks": "المخاطر"
+  },
+  "projects": {
+    "title": "المشاريع",
+    "new": "مشروع جديد",
+    "status": "حالة المشروع",
+    "progress": "نسبة الإنجاز",
+    "client": "العميل",
+    "code": "رمز المشروع",
+    "type": "نوع المشروع",
+    "startDate": "تاريخ البدء",
+    "endDate": "تاريخ الانتهاء",
+    "remainingDays": "الأيام المتبقية",
+    "health": "الصحة العامة",
+    "stage": "المرحلة الحالية",
+    "overview": "نظرة عامة",
+    "timeline": "الجدول الزمني",
+    "members": "الأعضاء",
+    "statuses": {
+      "Planning": "تخطيط",
+      "Active": "نشط",
+      "OnHold": "متوقف",
+      "Completed": "مكتمل",
+      "Archived": "مؤرشف"
+    },
+    "types": {
+      "GeneralEngineering": "هندسة عامة",
+      "Software": "برمجيات",
+      "CCTV": "كاميرات مراقبة",
+      "AccessControl": "التحكم في الدخول",
+      "Networking": "شبكات",
+      "Maintenance": "صيانة"
+    }
+  },
+  "sites": {
+    "title": "المواقع",
+    "new": "موقع جديد",
+    "address": "العنوان",
+    "latitude": "خط العرض",
+    "longitude": "خط الطول",
+    "statuses": {
+      "Pending": "معلق",
+      "Active": "نشط",
+      "Suspended": "موقوف",
+      "Completed": "مكتمل",
+      "Closed": "مغلق"
+    }
+  },
+  "tasks": {
+    "title": "المهام",
+    "new": "مهمة جديدة",
+    "assignTo": "تعيين إلى",
+    "dueDate": "تاريخ الاستحقاق",
+    "priority": "الأولوية",
+    "overdue": "متأخرة",
+    "remaining": "المتبقي",
+    "statuses": {
+      "Backlog": "قائمة الانتظار",
+      "ToDo": "قيد الانتظار",
+      "InProgress": "قيد التنفيذ",
+      "Blocked": "محظورة",
+      "Review": "قيد المراجعة",
+      "Completed": "مكتملة",
+      "Cancelled": "ملغاة"
+    },
+    "priorities": {
+      "Low": "منخفضة",
+      "Medium": "متوسطة",
+      "High": "عالية",
+      "Critical": "حرجة"
+    }
+  },
+  "documents": {
+    "title": "المستندات",
+    "upload": "رفع مستند",
+    "version": "الإصدار",
+    "approvalStatus": "حالة الاعتماد",
+    "lockedForEdit": "مقفل للتعديل",
+    "statuses": {
+      "Draft": "مسودة",
+      "PendingApproval": "بانتظار الاعتماد",
+      "Approved": "معتمد",
+      "Rejected": "مرفوض",
+      "Archived": "مؤرشف"
+    }
+  },
+  "chat": {
+    "title": "المحادثات",
+    "newMessage": "رسالة جديدة",
+    "typeMessage": "اكتب رسالتك...",
+    "send": "إرسال",
+    "online": "متصل",
+    "offline": "غير متصل",
+    "lastSeen": "آخر ظهور",
+    "members": "الأعضاء",
+    "addMembers": "إضافة أعضاء",
+    "groupChat": "دردشة جماعية",
+    "directChat": "محادثة مباشرة",
+    "projectChat": "محادثة المشروع",
+    "readBy": "قرأ من"
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "markAllRead": "تعيين الكل كمقروء",
+    "noNotifications": "لا توجد إشعارات",
+    "types": {
+      "TaskAssigned": "تم تعيين مهمة لك",
+      "TaskDueSoon": "موعد استحقاق مهمة قريب",
+      "TaskOverdue": "مهمة متأخرة",
+      "TaskCompleted": "تم إكمال مهمة",
+      "DocumentUploaded": "تم رفع مستند",
+      "DocumentApproved": "تم اعتماد مستند",
+      "DocumentRejected": "تم رفض مستند",
+      "CorrectionRequested": "طُلب تصحيح",
+      "ProjectAssigned": "تم تعيينك في مشروع",
+      "ProjectUpdated": "تم تحديث مشروع",
+      "MilestoneCompleted": "تم إكمال مرحلة",
+      "IssueCreated": "تم إنشاء مشكلة",
+      "IssueAssigned": "تم تعيين مشكلة لك",
+      "IssueOverdue": "مشكلة متأخرة",
+      "MaintenanceCreated": "تم إنشاء طلب صيانة",
+      "MaintenanceAssigned": "تم تعيين طلب صيانة",
+      "WarrantyExpiring": "الضمان على وشك الانتهاء",
+      "ChatMessage": "رسالة جديدة",
+      "Mention": "تم ذكرك",
+      "ApprovalRequested": "طُلب اعتماد"
+    }
+  },
+  "technicalOffice": {
+    "title": "المكتب الفني",
+    "boq": "جدول الكميات",
+    "offers": "العروض",
+    "invoices": "الفواتير"
+  },
+  "accounting": {
+    "title": "المحاسبة",
+    "invoices": "الفواتير",
+    "payments": "المدفوعات"
+  },
+  "auth": {
+    "login": "تسجيل الدخول",
+    "logout": "تسجيل الخروج",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "forgotPassword": "نسيت كلمة المرور؟",
+    "invalidCredentials": "البريد الإلكتروني أو كلمة المرور غير صحيحة",
+    "welcome": "مرحباً"
+  },
+  "language": {
+    "switch": "تغيير اللغة",
+    "ar": "العربية",
+    "en": "English"
+  },
+  "project": {
+    "commandCenter": "مركز التحكم بالمشروع",
+    "tabs": {
+      "overview": "نظرة عامة",
+      "timeline": "الجدول الزمني",
+      "sites": "المواقع",
+      "operations": "العمليات",
+      "tasks": "المهام",
+      "documents": "المستندات",
+      "boq": "جدول الكميات",
+      "technicalOffice": "المكتب الفني",
+      "materials": "المواد",
+      "assets": "الأصول",
+      "issues": "المشكلات",
+      "risks": "المخاطر",
+      "chat": "الدردشة",
+      "activity": "النشاط",
+      "reports": "التقارير"
+    }
+  },
+  "validation": {
+    "required": "هذا الحقل مطلوب",
+    "email": "البريد الإلكتروني غير صالح",
+    "minLength": "يجب أن يحتوي على {{min}} أحرف على الأقل",
+    "maxLength": "يجب ألا يتجاوز {{max}} حرفاً",
+    "invalidFormat": "تنسيق غير صالح"
+  }
+}

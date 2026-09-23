@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MTI.ProjectManagement.Application.Common;
@@ -111,3 +111,4 @@ public class SettingsController : ControllerBase
         return Ok(ApiResponse<SystemSetting>.Ok(setting, "Setting updated."));
     }
 }
+

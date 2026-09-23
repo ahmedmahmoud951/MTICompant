@@ -11,7 +11,11 @@ public record NotificationDto(
     string? EntityId,
     bool IsRead,
     DateTime CreatedAt,
-    DateTime? ReadAt
+    DateTime? ReadAt,
+    string? TitleKey = null,
+    string? BodyKey = null,
+    string? DataJson = null,
+    string? EventKey = null
 );
 
 public record NotificationSummaryDto(

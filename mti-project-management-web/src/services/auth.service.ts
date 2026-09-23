@@ -26,19 +26,32 @@ export const authService = {
     return apiClient.get('/api/auth/me');
   },
 
+  /** True only when both user profile and access token exist locally. */
+  hasSession(): boolean {
+    if (typeof window === 'undefined') return false;
+    return !!(localStorage.getItem('mti_user') && localStorage.getItem('mti_access_token'));
+  },
+
   async logout(): Promise<void> {
     const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('mti_refresh_token') : null;
+    // Clear local session first so UI never stays "half logged in"
+    apiClient.clearTokens();
     try {
-      await apiClient.post('/api/auth/logout', { refreshToken });
+      if (refreshToken) {
+        await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'https://mtiapi.runasp.net'}/api/auth/logout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+      }
     } catch {
       // Ignore network errors on logout
-    } finally {
-      apiClient.clearTokens();
     }
   },
 
   getCurrentUser(): User | null {
     if (typeof window === 'undefined') return null;
+    if (!localStorage.getItem('mti_access_token')) return null;
     const userJson = localStorage.getItem('mti_user');
     if (!userJson) return null;
     try {

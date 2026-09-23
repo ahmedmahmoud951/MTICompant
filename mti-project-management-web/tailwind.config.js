@@ -13,6 +13,13 @@ module.exports = {
         display: ['var(--font-display)', 'sans-serif'],
         body: ['var(--font-body)', 'sans-serif'],
       },
+      fontSize: {
+        xs: ['0.875rem', { lineHeight: '1.35rem' }],
+        sm: ['0.975rem', { lineHeight: '1.5rem' }],
+        base: ['1.0625rem', { lineHeight: '1.7rem' }],
+        lg: ['1.175rem', { lineHeight: '1.8rem' }],
+        xl: ['1.3rem', { lineHeight: '1.9rem' }],
+      },
       colors: {
         mti: {
           50: '#f0f9ff',
@@ -34,8 +41,9 @@ module.exports = {
         }
       },
       boxShadow: {
-        glass: '0 12px 40px rgba(0, 0, 0, 0.22)',
-        glow: '0 8px 28px rgba(14, 165, 233, 0.22)',
+        glass: '0 14px 40px rgba(0, 0, 0, 0.34), 0 0 24px rgba(14, 165, 233, 0.12)',
+        glow: '0 8px 28px rgba(14, 165, 233, 0.32), 0 0 40px rgba(14, 165, 233, 0.14)',
+        'glow-strong': '0 16px 44px rgba(0, 0, 0, 0.4), 0 0 40px rgba(14, 165, 233, 0.36), 0 0 72px rgba(14, 165, 233, 0.16)',
       },
     },
   },

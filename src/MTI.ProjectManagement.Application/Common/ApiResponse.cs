@@ -6,12 +6,22 @@ public class ApiResponse<T>
     public string? Message { get; set; }
     public T? Data { get; set; }
     public List<string> Errors { get; set; } = new();
+    public string? TraceId { get; set; }
 
-    public static ApiResponse<T> Ok(T data, string? message = null) =>
-        new() { Success = true, Message = message, Data = data };
+    public static ApiResponse<T> Ok(T data, string? message = null, string? traceId = null) =>
+        new() { Success = true, Message = message, Data = data, TraceId = traceId };
 
-    public static ApiResponse<T> Fail(string message, List<string>? errors = null) =>
-        new() { Success = false, Message = message, Errors = errors ?? new() };
+    public static ApiResponse<T> Fail(string message, List<string>? errors = null, string? traceId = null) =>
+        new() { Success = false, Message = message, Errors = errors ?? new(), TraceId = traceId };
+
+    public static ApiResponse<T> SuccessResult(T data, string? message = null, string? traceId = null) =>
+        Ok(data, message, traceId);
+
+    public static ApiResponse<T> ErrorResult(string message, List<string>? errors = null, string? traceId = null) =>
+        Fail(message, errors, traceId);
+
+    public static ApiResponse<T> ErrorResult(string message, string error, string? traceId = null) =>
+        Fail(message, new List<string> { error }, traceId);
 }
 
 public class PagedResult<T>

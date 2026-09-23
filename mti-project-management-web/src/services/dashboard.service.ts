@@ -1,5 +1,11 @@
 import { apiClient } from '@/lib/api-client';
-import { AdminDashboardStats, EngineerDashboardStats, AuditLogItem, SystemSafeConfig } from '@/types';
+import {
+  AdminDashboardStats,
+  EngineerDashboardStats,
+  TechnicalOfficeDashboardStats,
+  AuditLogItem,
+  SystemSafeConfig
+} from '@/types';
 
 export const dashboardService = {
   async getAdminStats(): Promise<AdminDashboardStats> {
@@ -8,7 +14,18 @@ export const dashboardService = {
   },
 
   async getEngineerStats(): Promise<EngineerDashboardStats> {
-    const res = await apiClient.get<EngineerDashboardStats>('/api/reports/engineer-stats');
+    try {
+      const res = await apiClient.get<EngineerDashboardStats>('/api/dashboard/engineer');
+      if (res.success && res.data) return res.data;
+    } catch {
+      // fall through to legacy endpoint
+    }
+    const fallback = await apiClient.get<EngineerDashboardStats>('/api/reports/engineer-stats');
+    return fallback.data;
+  },
+
+  async getTechnicalOfficeDashboard(): Promise<TechnicalOfficeDashboardStats> {
+    const res = await apiClient.get<TechnicalOfficeDashboardStats>('/api/dashboard/technical-office');
     return res.data;
   },
 
