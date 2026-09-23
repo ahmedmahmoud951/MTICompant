@@ -129,7 +129,7 @@
   align-items: stretch;
   overflow: hidden;
   width: 100%;
-  height: 176px;
+  height: clamp(100px, 22vw, 176px);
   background: #06111f;
   border-radius: 1rem;
 }
@@ -1258,3 +1258,73 @@ textarea:disabled {
   animation: action-loading-slide 1.15s ease-in-out infinite;
   width: 35% !important;
 }
+
+/* ======================================================== */
+/* MOBILE & TABLET RESPONSIVE SYSTEM (Touch & Safe Area) */
+/* ======================================================== */
+
+/* Prevent iOS auto-zoom on input focus */
+@media (max-width: 768px) {
+  input[type="text"],
+  input[type="password"],
+  input[type="email"],
+  input[type="number"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  input[type="date"],
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Mobile Bottom Sheet Modal transformation on screens <= 640px */
+@media (max-width: 640px) {
+  .app-modal-overlay {
+    padding: 0 !important;
+    align-items: flex-end !important;
+  }
+
+  .app-modal-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 92dvh !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    border-top-left-radius: 1.5rem !important;
+    border-top-right-radius: 1.5rem !important;
+    margin-bottom: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .app-modal-header {
+    padding: 0.85rem 1rem 0.75rem !important;
+  }
+
+  .app-modal-body {
+    padding: 0.85rem 1rem !important;
+  }
+
+  .app-modal-footer {
+    padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+/* Smooth touch scrolling for tables */
+.table-responsive-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+/* Safe area padding utilities */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+

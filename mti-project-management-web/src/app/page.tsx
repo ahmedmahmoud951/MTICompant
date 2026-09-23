@@ -3020,7 +3020,7 @@ export default function Home() {
 
               {/* Facebook Messenger Dropdown Popover */}
               {showMessagesDropdown && (
-                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-2xl bg-[#1a2f4a] border-2 border-cyan-400/25 shadow-xl z-50 overflow-hidden animate-fade-up">
+                <div className="absolute end-0 mt-2 w-[calc(100vw-2rem)] sm:w-96 max-w-sm rounded-2xl bg-[#1a2f4a] border-2 border-cyan-400/25 shadow-xl z-50 overflow-hidden animate-fade-up">
                   <div className="p-3.5 border-b-2 border-cyan-400/20 flex items-center justify-between bg-[#15294a]">
                     <div className="flex items-center gap-2">
                       <MessageSquare className="w-4 h-4 text-cyan-300" />
@@ -3131,7 +3131,7 @@ export default function Home() {
               </button>
 
               {showNotificationsDropdown && (
-                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-2xl bg-slate-800/45 border border-slate-600/50 shadow-xl backdrop-blur-xl z-50 overflow-hidden animate-fade-up">
+                <div className="absolute end-0 mt-2 w-[calc(100vw-2rem)] sm:w-96 max-w-sm rounded-2xl bg-slate-800/45 border border-slate-600/50 shadow-xl backdrop-blur-xl z-50 overflow-hidden animate-fade-up">
                   <div className="p-3.5 border-b border-slate-600/50 flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <Bell className="w-4 h-4 text-cyan-300" />
@@ -3255,7 +3255,7 @@ export default function Home() {
 
         {/* Scrollable View Content */}
         <main
-          className={`flex-1 p-4 sm:p-6 space-y-6 min-h-0 ${activeTab === 'chat' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'
+          className={`flex-1 p-3 sm:p-6 pb-24 lg:pb-6 space-y-6 min-h-0 ${activeTab === 'chat' ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'
             }`}
         >
           {/* Skeleton Loader while content switching */}
@@ -4728,7 +4728,7 @@ export default function Home() {
               {activeTab === 'chat' && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-0 flex-1 min-h-0 h-full max-h-[calc(100dvh-10.5rem)] rounded-2xl border-2 border-cyan-400/25 overflow-hidden shadow-xl bg-[#0f1c30]">
                   {/* Conversations list (by name) — scrollable */}
-                  <div className="md:col-span-1 border-e-2 border-slate-500/40 flex flex-col min-h-0 h-full overflow-hidden bg-[#132238]">
+                  <div className={`md:col-span-1 border-e-2 border-slate-500/40 flex-col min-h-0 h-full overflow-hidden bg-[#132238] ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
                     <div className="flex-shrink-0 p-3.5 border-b-2 border-cyan-400/20 space-y-3 bg-[#15294a]">
                       <div className="flex items-center justify-between gap-2">
                         <div>
@@ -4884,12 +4884,21 @@ export default function Home() {
                   </div>
 
                   {/* Message stream — scroll messages, pin composer */}
-                  <div className="md:col-span-2 flex flex-col min-h-0 h-full overflow-hidden bg-[#15253c]">
+                  <div className={`md:col-span-2 flex-col min-h-0 h-full overflow-hidden bg-[#15253c] ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
                     {activeConversation ? (
                       <>
                         <div className="flex-shrink-0 p-3.5 border-b-2 border-cyan-400/20 flex items-center justify-between bg-[#15294a]">
-                          <div className="flex items-center gap-3">
-                            <div className="relative">
+                          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                            <button
+                              type="button"
+                              onClick={() => setActiveConversation(null)}
+                              className="md:hidden p-2 -ms-1 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-cyan-300 border border-cyan-400/30 flex items-center justify-center flex-shrink-0"
+                              title={lang === 'ar' ? 'رجوع للمحادثات' : 'Back to chats'}
+                              aria-label={lang === 'ar' ? 'رجوع للمحادثات' : 'Back to chats'}
+                            >
+                              <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
+                            </button>
+                            <div className="relative flex-shrink-0">
                               <div className="w-11 h-11 rounded-full bg-cyan-600 text-white flex items-center justify-center font-bold text-sm shadow-sm">
                                 {getConversationDisplayName(activeConversation)[0]}
                               </div>
@@ -5196,8 +5205,8 @@ export default function Home() {
                     />
                   </div>
 
-                  <div className="glow-card rounded-2xl overflow-hidden">
-                    <table className="w-full text-left text-xs text-slate-300">
+                  <div className="glow-card rounded-2xl overflow-x-auto table-responsive-container">
+                    <table className="w-full text-start text-xs text-slate-300 min-w-[550px]">
                       <thead className="bg-slate-800/55 border-b border-slate-600/50 text-slate-400 uppercase text-[10px]">
                         <tr>
                           <th className="p-3">{t('auditColTime')}</th>
@@ -6398,6 +6407,100 @@ export default function Home() {
             </>
           )}
         </main>
+
+        {/* MOBILE BOTTOM NAVIGATION BAR (Glass Bottom Nav for Smartphones & Tablets) */}
+        <nav className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[#0c1626]/95 backdrop-blur-xl border-t border-cyan-500/25 px-2 py-1.5 flex items-center justify-around pb-safe shadow-[0_-4px_30px_rgba(0,0,0,0.6)]">
+          {/* 1. Dashboard */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('dashboard');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
+              activeTab === 'dashboard'
+                ? 'text-cyan-300 font-bold bg-cyan-500/15'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <LayoutDashboard className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] leading-tight">{t('navDashboard')}</span>
+          </button>
+
+          {/* 2. Project Data / Reports */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab(isAdmin ? 'project-data' : 'my-data');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
+              activeTab === 'project-data' || activeTab === 'my-data'
+                ? 'text-cyan-300 font-bold bg-cyan-500/15'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <FileSpreadsheet className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] leading-tight">{lang === 'ar' ? 'البيانات' : 'Data'}</span>
+          </button>
+
+          {/* 3. Reports Archive */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('reports-archive');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all relative ${
+              activeTab === 'reports-archive'
+                ? 'text-emerald-400 font-bold bg-emerald-500/15'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <div className="relative">
+              <ShieldCheck className="w-5 h-5 mb-0.5 text-emerald-400" />
+              {approvedRecords.length > 0 && (
+                <span className="absolute -top-1 -end-2 px-1 rounded-full bg-emerald-500 text-slate-950 font-bold text-[9px] leading-tight">
+                  {approvedRecords.length}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] leading-tight">{lang === 'ar' ? 'الأرشيف' : 'Archive'}</span>
+          </button>
+
+          {/* 4. Chat */}
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab('chat');
+            }}
+            className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all relative ${
+              activeTab === 'chat'
+                ? 'text-cyan-300 font-bold bg-cyan-500/15'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <div className="relative">
+              <MessageSquare className="w-5 h-5 mb-0.5" />
+              {totalUnreadMessages > 0 && (
+                <span className="absolute -top-1 -end-2 px-1 rounded-full bg-cyan-500 text-white font-bold text-[9px] leading-tight animate-pulse">
+                  {totalUnreadMessages}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] leading-tight">{lang === 'ar' ? 'المحادثات' : 'Chat'}</span>
+          </button>
+
+          {/* 5. Menu / More */}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className="flex flex-col items-center justify-center py-1 px-3 rounded-xl text-slate-400 hover:text-slate-200 transition-all"
+          >
+            <Menu className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] leading-tight">{lang === 'ar' ? 'المزيد' : 'Menu'}</span>
+          </button>
+        </nav>
       </div>
 
       {/* 3. ENTERPRISE INSPECTION DRAWER (Prompt 20) */}

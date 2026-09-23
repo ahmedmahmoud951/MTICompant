@@ -1,5 +1,5 @@
 import '@/styles/globals.css';
-import { Metadata } from 'next';
+import { Metadata, Viewport } from 'next';
 import { Sora, Manrope, Cairo } from 'next/font/google';
 import { I18nProvider } from '@/components/I18nProvider';
 
@@ -25,6 +25,14 @@ const arabic = Cairo({
 export const metadata: Metadata = {
   title: 'MTI Engineering Solutions | Project Management Platform',
   description: 'Internal Enterprise Project Management, Site Monitoring, and Real-Time Coordination System',
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
+  themeColor: '#0b1524',
 };
 
 export default function RootLayout({
