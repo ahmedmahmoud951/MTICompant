@@ -12,5 +12,6 @@ export * from './organization/OrganizationView';
 export * from './accounting/AccountingWorkspace';
 export * from './operations/SiteOperationsManager';
 export * from './reports/DailySiteReportsManager';
+export * from './reports/ReportsAnalyticsHub';
 export * from './dashboard/MainDashboard';
 

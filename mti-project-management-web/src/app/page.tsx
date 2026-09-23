@@ -46,6 +46,7 @@ import {
   AccountingWorkspace,
   SiteOperationsManager,
   DailySiteReportsManager,
+  ReportsAnalyticsHub,
   MainDashboard
 } from '@/features';
 import {
@@ -511,6 +512,17 @@ export default function Home() {
           }
         })
         .catch(() => { });
+    }
+  }, [activeTab, currentUser]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    if (activeTab === 'reports-archive' || activeTab === 'reports') {
+      dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => { });
+    }
+    if (activeTab === 'approvals' || activeTab === 'project-data' || activeTab === 'my-data') {
+      dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => { });
+      dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => { });
     }
   }, [activeTab, currentUser]);
 
@@ -1272,13 +1284,14 @@ export default function Home() {
       const isAdminUser = user.roles.includes('Admin') || user.roles.includes('SystemAdmin');
       if (isAdminUser) {
         dashboardService.getAdminStats().then(setAdminStats).catch(() => { });
-        dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => { });
         dashboardService.getUsers().then(setUserList).catch(() => { });
         dashboardService.getAuditLogs().then((res) => setAuditLogs(res.items)).catch(() => { });
       } else {
         dashboardService.getEngineerStats().then(setEngineerStats).catch(() => { });
-        dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => { });
       }
+      // Load both approved and pending data records for ALL roles so the archive and reports are always populated on initial load and page reload
+      dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => { });
+      dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => { });
       taskService.getTasks().then(setTasks).catch(() => { });
       siteService.getAllSites().then((res) => setAllSites(res.data || [])).catch(() => { });
       chatService.getConversations().then((convs) => {
@@ -2695,6 +2708,7 @@ export default function Home() {
     { id: 'my-sites', label: t('navMySites'), icon: MapPin },
     { id: 'my-data', label: t('navMyData'), icon: FileSpreadsheet },
     { id: 'reports-archive', label: t('navReportsArchive'), icon: ShieldCheck, badge: approvedRecords.length },
+    { id: 'reports', label: t('navReports'), icon: BarChart3 },
     { id: 'my-tasks', label: t('navMyTasks'), icon: CheckSquare },
     { id: 'chat', label: t('navChat'), icon: MessageSquare },
     { id: 'notifications', label: t('navNotifications'), icon: Bell },
@@ -2712,6 +2726,7 @@ export default function Home() {
     { id: 'my-sites', label: t('navMySites'), icon: MapPin },
     { id: 'my-data', label: t('navMyData'), icon: FileSpreadsheet },
     { id: 'reports-archive', label: t('navReportsArchive'), icon: ShieldCheck, badge: approvedRecords.length },
+    { id: 'reports', label: t('navReports'), icon: BarChart3 },
     { id: 'my-tasks', label: t('navMyTasks'), icon: CheckSquare },
     { id: 'chat', label: t('navChat'), icon: MessageSquare },
     { id: 'notifications', label: t('navNotifications'), icon: Bell },
@@ -5232,6 +5247,23 @@ export default function Home() {
                     </table>
                   </div>
                 </div>
+              )}
+
+              {/* ======================================================== */}
+              {/* VIEW: REPORTS & ANALYTICS HUB (Catalog & Exports) */}
+              {/* ======================================================== */}
+              {activeTab === 'reports' && (
+                <ReportsAnalyticsHub
+                  currentUser={currentUser}
+                  projects={projects}
+                  sites={allSites}
+                  tasks={tasks}
+                  approvedRecords={approvedRecords}
+                  pendingRecords={pendingRecords}
+                  adminStats={adminStats}
+                  lang={lang}
+                  onNavigateTab={(tab) => setActiveTab(tab as any)}
+                />
               )}
 
               {/* ======================================================== */}
