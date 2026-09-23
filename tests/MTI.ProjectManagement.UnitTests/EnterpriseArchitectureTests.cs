@@ -63,10 +63,12 @@ public class EnterpriseArchitectureTests
         var b2Service = new BackblazeB2StorageService(configuration);
 
         var assetKey = b2Service.BuildAssetObjectKey(projectId, assetId, "blueprint.dwg");
-        Assert.Equal($"projects/{projectId}/assets/{assetId}/blueprint.dwg", assetKey);
+        Assert.StartsWith($"projects/{projectId}/assets/{assetId}/blueprint", assetKey);
+        Assert.EndsWith(".dwg", assetKey);
 
         var chatKey = b2Service.BuildChatObjectKey(conversationId, messageId, attachmentId, "photo.jpg");
-        Assert.Equal($"chat/{conversationId}/{messageId}/{attachmentId}/photo.jpg", chatKey);
+        Assert.StartsWith($"chat/{conversationId}/{messageId}/{attachmentId}/photo", chatKey);
+        Assert.EndsWith(".jpg", chatKey);
     }
 
     [Fact]

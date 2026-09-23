@@ -10,7 +10,17 @@ import {
   ProjectTeam,
   SiteMember,
   SiteTeam,
-  OrganizationRoles
+  OrganizationRoles,
+  ResourceResponsibility,
+  RaciMatrix,
+  AssignResponsibilityRequest,
+  UserWorkload,
+  TeamWorkload,
+  ProjectWorkload,
+  Delegation,
+  CreateDelegationRequest,
+  BatchAssignUsersRequest,
+  BatchAssignTeamsRequest
 } from '@/types';
 
 export const organizationService = {
@@ -284,5 +294,94 @@ export const organizationService = {
 
   async removeSiteTeam(siteId: string, siteTeamId: string): Promise<ApiResponse<boolean>> {
     return apiClient.delete(`/api/sites/${siteId}/teams/${siteTeamId}`);
+  },
+
+  // ==========================================
+  // UI-ORG-01 & UI-ORG-02: Multi-Select Batch Assignments
+  // ==========================================
+
+  async batchAssignProjectMembers(projectId: string, data: BatchAssignUsersRequest): Promise<ApiResponse<ProjectMember[]>> {
+    return apiClient.post(`/api/projects/${projectId}/members/batch`, data);
+  },
+
+  async batchAssignProjectTeams(projectId: string, data: BatchAssignTeamsRequest): Promise<ApiResponse<ProjectTeam[]>> {
+    return apiClient.post(`/api/projects/${projectId}/teams/batch`, data);
+  },
+
+  async batchAssignSiteMembers(siteId: string, data: BatchAssignUsersRequest): Promise<ApiResponse<SiteMember[]>> {
+    return apiClient.post(`/api/sites/${siteId}/members/batch`, data);
+  },
+
+  async batchAssignSiteTeams(siteId: string, data: BatchAssignTeamsRequest): Promise<ApiResponse<SiteTeam[]>> {
+    return apiClient.post(`/api/sites/${siteId}/teams/batch`, data);
+  },
+
+  // ==========================================
+  // ORG-06: RACI Responsibility Matrix
+  // ==========================================
+
+  async getRaciMatrix(resourceType: string, resourceId: string): Promise<ApiResponse<RaciMatrix>> {
+    return apiClient.get(`/api/organization/raci?resourceType=${encodeURIComponent(resourceType)}&resourceId=${encodeURIComponent(resourceId)}`);
+  },
+
+  async assignResponsibility(data: AssignResponsibilityRequest): Promise<ApiResponse<ResourceResponsibility>> {
+    return apiClient.post('/api/organization/raci', data);
+  },
+
+  async removeResponsibility(id: string): Promise<ApiResponse<boolean>> {
+    return apiClient.delete(`/api/organization/raci/${id}`);
+  },
+
+  // ==========================================
+  // ORG-07: Team Manager Scoped Operations
+  // ==========================================
+
+  async getTeamManagerScope(teamId: string): Promise<ApiResponse<{
+    team: Team;
+    members: TeamMember[];
+    assignedProjects: any[];
+    assignedSites: any[];
+    assignedTasks: any[];
+    documents: any[];
+    workload: TeamWorkload;
+  }>> {
+    return apiClient.get(`/api/organization/teams/${teamId}/manager-scope`);
+  },
+
+  // ==========================================
+  // ORG-08: Workload Visibility
+  // ==========================================
+
+  async getUsersWorkload(departmentId?: string): Promise<ApiResponse<UserWorkload[]>> {
+    const qs = departmentId ? `?departmentId=${encodeURIComponent(departmentId)}` : '';
+    return apiClient.get(`/api/organization/workload/users${qs}`);
+  },
+
+  async getTeamsWorkload(departmentId?: string): Promise<ApiResponse<TeamWorkload[]>> {
+    const qs = departmentId ? `?departmentId=${encodeURIComponent(departmentId)}` : '';
+    return apiClient.get(`/api/organization/workload/teams${qs}`);
+  },
+
+  async getProjectsWorkload(): Promise<ApiResponse<ProjectWorkload[]>> {
+    return apiClient.get('/api/organization/workload/projects');
+  },
+
+  // ==========================================
+  // ORG-09: Temporary Responsibility Delegation
+  // ==========================================
+
+  async getDelegations(userId?: string, activeOnly = true): Promise<ApiResponse<Delegation[]>> {
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    params.append('activeOnly', String(activeOnly));
+    return apiClient.get(`/api/organization/delegations?${params.toString()}`);
+  },
+
+  async createDelegation(data: CreateDelegationRequest): Promise<ApiResponse<Delegation>> {
+    return apiClient.post('/api/organization/delegations', data);
+  },
+
+  async revokeDelegation(id: string): Promise<ApiResponse<boolean>> {
+    return apiClient.delete(`/api/organization/delegations/${id}`);
   }
 };

@@ -47,6 +47,22 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
             if (isProjectManager) return true;
         }
 
+        // 5. ORG-09: Temporary Responsibility Delegation
+        var now = DateTime.UtcNow;
+        var hasSiteDelegation = await _context.Delegations
+            .AnyAsync(d => d.DelegateUserId == userId && d.IsActive && d.RevokedAt == null
+                && d.StartAt <= now && now <= d.EndAt
+                && (d.ScopeType == "Global" || (d.ScopeType == "Site" && d.ScopeId == siteId) || (site != null && d.ScopeType == "Project" && d.ScopeId == site.ProjectId)), cancellationToken);
+
+        if (hasSiteDelegation) return true;
+
+        // 6. ORG-06: RACI Responsibility Matrix
+        var hasRaciSite = await _context.ResourceResponsibilities
+            .AnyAsync(r => r.ResourceType == "Site" && r.ResourceId == siteId && r.IsActive
+                && (r.UserId == userId || (r.TeamId.HasValue && r.Team.Members.Any(tm => tm.UserId == userId && tm.IsActive && tm.LeftAt == null))), cancellationToken);
+
+        if (hasRaciSite) return true;
+
         // Rule ORG-05: Engineer assigned to Site A must not automatically see Site B
         return false;
     }
@@ -79,7 +95,23 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
             .AnyAsync(st => st.Site.ProjectId == projectId && st.IsActive
                 && st.Team.Members.Any(tm => tm.UserId == userId && tm.IsActive && tm.LeftAt == null), cancellationToken);
 
-        return hasSiteAccessInProject;
+        if (hasSiteAccessInProject) return true;
+
+        // 5. ORG-09: Temporary Responsibility Delegation
+        var now = DateTime.UtcNow;
+        var hasProjectDelegation = await _context.Delegations
+            .AnyAsync(d => d.DelegateUserId == userId && d.IsActive && d.RevokedAt == null
+                && d.StartAt <= now && now <= d.EndAt
+                && (d.ScopeType == "Global" || (d.ScopeType == "Project" && d.ScopeId == projectId)), cancellationToken);
+
+        if (hasProjectDelegation) return true;
+
+        // 6. ORG-06: RACI Responsibility Matrix
+        var hasRaciProject = await _context.ResourceResponsibilities
+            .AnyAsync(r => r.ResourceType == "Project" && r.ResourceId == projectId && r.IsActive
+                && (r.UserId == userId || (r.TeamId.HasValue && r.Team.Members.Any(tm => tm.UserId == userId && tm.IsActive && tm.LeftAt == null))), cancellationToken);
+
+        return hasRaciProject;
     }
 
     public async Task<List<Guid>> GetAuthorizedSiteIdsAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -88,6 +120,8 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
         {
             return await _context.Sites.Select(s => s.Id).ToListAsync(cancellationToken);
         }
+
+        var now = DateTime.UtcNow;
 
         // 1. Direct active site memberships
         var directSiteIds = await _context.SiteMembers
@@ -112,15 +146,38 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
             .Select(pm => pm.ProjectId)
             .ToListAsync(cancellationToken);
 
+        // Include projects delegated to user as ProjectManager
+        var delegatedProjectIds = await _context.Delegations
+            .Where(d => d.DelegateUserId == userId && d.IsActive && d.RevokedAt == null && d.StartAt <= now && now <= d.EndAt && d.ScopeType == "Project" && d.ScopeId.HasValue)
+            .Select(d => d.ScopeId!.Value)
+            .ToListAsync(cancellationToken);
+
+        var allManagedProjectIds = managedProjectIds.Concat(delegatedProjectIds).Distinct().ToList();
+
         var managedSiteIds = await _context.Sites
-            .Where(s => managedProjectIds.Contains(s.ProjectId))
+            .Where(s => allManagedProjectIds.Contains(s.ProjectId))
             .Select(s => s.Id)
+            .ToListAsync(cancellationToken);
+
+        // 4. Directly delegated sites
+        var delegatedSiteIds = await _context.Delegations
+            .Where(d => d.DelegateUserId == userId && d.IsActive && d.RevokedAt == null && d.StartAt <= now && now <= d.EndAt && d.ScopeType == "Site" && d.ScopeId.HasValue)
+            .Select(d => d.ScopeId!.Value)
+            .ToListAsync(cancellationToken);
+
+        // 5. RACI Sites
+        var raciSiteIds = await _context.ResourceResponsibilities
+            .Where(r => r.ResourceType == "Site" && r.IsActive
+                && (r.UserId == userId || (r.TeamId.HasValue && r.Team.Members.Any(tm => tm.UserId == userId && tm.IsActive && tm.LeftAt == null))))
+            .Select(r => r.ResourceId)
             .ToListAsync(cancellationToken);
 
         return directSiteIds
             .Concat(assignmentSiteIds)
             .Concat(teamSiteIds)
             .Concat(managedSiteIds)
+            .Concat(delegatedSiteIds)
+            .Concat(raciSiteIds)
             .Distinct()
             .ToList();
     }

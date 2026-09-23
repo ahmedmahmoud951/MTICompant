@@ -9,6 +9,13 @@ export const MODULES = [
 export * from './documents/DocumentsManager';
 export * from './milestones/MilestonesRoadmap';
 export * from './organization/OrganizationView';
+export * from './organization/RaciMatrixTab';
+export * from './organization/MasterDataCenterTab';
+export * from './organization/UserAdminTab';
+export * from './organization/BatchAssignmentTab';
+export * from './organization/TeamManagerHubTab';
+export * from './organization/WorkloadTab';
+export * from './organization/DelegationsTab';
 export * from './accounting/AccountingWorkspace';
 export * from './operations/SiteOperationsManager';
 export * from './reports/DailySiteReportsManager';

@@ -87,11 +87,14 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<UserSession> UserSessions => Set<UserSession>();
     public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
 
-    // Organization & Teams
+    // Organization & Teams & RACI
     public DbSet<Department> Departments => Set<Department>();
     public DbSet<DepartmentMember> DepartmentMembers => Set<DepartmentMember>();
     public DbSet<Team> Teams => Set<Team>();
     public DbSet<TeamMember> TeamMembers => Set<TeamMember>();
+    public DbSet<ResourceResponsibility> ResourceResponsibilities => Set<ResourceResponsibility>();
+    public DbSet<MasterDataItem> MasterDataItems => Set<MasterDataItem>();
+    public DbSet<Delegation> Delegations => Set<Delegation>();
 
     // Milestones & Assignments
     public DbSet<ProjectMilestone> ProjectMilestones => Set<ProjectMilestone>();
@@ -1054,6 +1057,81 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.Property(e => e.Status).HasMaxLength(20).IsRequired();
             entity.Property(e => e.TargetGroup).HasMaxLength(200);
             entity.Property(e => e.Payload).HasColumnType("nvarchar(max)").IsRequired();
+        });
+
+        // ORG-06: RACI Responsibility Matrix
+        modelBuilder.Entity<ResourceResponsibility>(entity =>
+        {
+            entity.ToTable("ResourceResponsibilities");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.ResourceType, e.ResourceId, e.IsActive });
+            entity.HasIndex(e => new { e.UserId, e.IsActive });
+            entity.HasIndex(e => new { e.TeamId, e.IsActive });
+            entity.Property(e => e.ResourceType).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ResponsibilityType).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Notes).HasMaxLength(500);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Team)
+                .WithMany()
+                .HasForeignKey(e => e.TeamId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.AssignedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ADMIN-02: Configurable Master Data
+        modelBuilder.Entity<MasterDataItem>(entity =>
+        {
+            entity.ToTable("MasterDataItems");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.Category, e.Code }).IsUnique();
+            entity.HasIndex(e => new { e.Category, e.IsActive, e.DisplayOrder });
+            entity.Property(e => e.Category).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Code).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.NameAr).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.NameEn).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(500);
+
+            entity.HasOne(e => e.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.CreatedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ORG-09: Temporary Responsibility Delegation
+        modelBuilder.Entity<Delegation>(entity =>
+        {
+            entity.ToTable("Delegations");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.DelegateUserId, e.IsActive, e.StartAt, e.EndAt });
+            entity.HasIndex(e => new { e.UserId, e.IsActive });
+            entity.HasIndex(e => new { e.ScopeType, e.ScopeId, e.IsActive });
+            entity.Property(e => e.ScopeType).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.Role).HasMaxLength(100);
+            entity.Property(e => e.Reason).HasMaxLength(500);
+
+            entity.HasOne(e => e.User)
+                .WithMany(u => u.GivenDelegations)
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.DelegateUser)
+                .WithMany(u => u.ReceivedDelegations)
+                .HasForeignKey(e => e.DelegateUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.CreatedBy)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 

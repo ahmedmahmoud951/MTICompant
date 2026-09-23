@@ -19,6 +19,10 @@ public class TaskItem : FullAuditedEntity
 
     public Guid? AssignedToUserId { get; set; }
     public User? AssignedToUser { get; set; }
+    [NotMapped]
+    public Guid? AssigneeId { get => AssignedToUserId; set => AssignedToUserId = value; }
+    [NotMapped]
+    public User? Assignee { get => AssignedToUser; set => AssignedToUser = value; }
 
     public Guid? AssignedToTeamId { get; set; }
 

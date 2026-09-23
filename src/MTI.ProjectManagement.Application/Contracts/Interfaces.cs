@@ -71,11 +71,14 @@ public interface IAppDbContext
     DbSet<UserSession> UserSessions { get; }
     DbSet<UserPreference> UserPreferences { get; }
 
-    // Organization & Teams
+    // Organization & Teams & RACI
     DbSet<Department> Departments { get; }
     DbSet<DepartmentMember> DepartmentMembers { get; }
     DbSet<Team> Teams { get; }
     DbSet<TeamMember> TeamMembers { get; }
+    DbSet<ResourceResponsibility> ResourceResponsibilities { get; }
+    DbSet<MasterDataItem> MasterDataItems { get; }
+    DbSet<Delegation> Delegations { get; }
 
     // Milestones & Assignments
     DbSet<ProjectMilestone> ProjectMilestones { get; }

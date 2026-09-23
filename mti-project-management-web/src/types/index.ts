@@ -1178,3 +1178,252 @@ export interface OrganizationRoles {
   siteRoles: string[];
 }
 
+// ============================================================
+// ORG-06: RACI Responsibility Matrix
+// ============================================================
+
+export type ResponsibilityType = 'Responsible' | 'Accountable' | 'Consulted' | 'Informed';
+
+export interface ResourceResponsibility {
+  id: string;
+  resourceType: 'Project' | 'Site' | 'Task' | 'Document' | string;
+  resourceId: string;
+  resourceName?: string;
+  userId?: string | null;
+  userName?: string | null;
+  userEmail?: string | null;
+  teamId?: string | null;
+  teamName?: string | null;
+  responsibilityType: ResponsibilityType;
+  assignedBy?: string | null;
+  assignedByName?: string | null;
+  createdAt: string;
+  isActive: boolean;
+}
+
+export interface AssignResponsibilityRequest {
+  resourceType: string;
+  resourceId: string;
+  userId?: string | null;
+  teamId?: string | null;
+  responsibilityType: ResponsibilityType;
+}
+
+export interface RaciMatrix {
+  resourceType: string;
+  resourceId: string;
+  resourceName: string;
+  responsible: ResourceResponsibility[];
+  accountable: ResourceResponsibility[];
+  consulted: ResourceResponsibility[];
+  informed: ResourceResponsibility[];
+}
+
+// ============================================================
+// ADMIN-02 & ADMIN-03: Master Data Center
+// ============================================================
+
+export interface MasterDataItem {
+  id: string;
+  category: string;
+  code: string;
+  name: string;
+  nameAr?: string | null;
+  description?: string | null;
+  sortOrder: number;
+  isSystem: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface MasterDataCategory {
+  category: string;
+  displayName: string;
+  description: string;
+  itemCount: number;
+}
+
+export interface CreateMasterDataItemRequest {
+  category: string;
+  code: string;
+  name: string;
+  nameAr?: string;
+  description?: string;
+  sortOrder?: number;
+}
+
+export interface UpdateMasterDataItemRequest {
+  name: string;
+  nameAr?: string;
+  description?: string;
+  sortOrder?: number;
+  isActive: boolean;
+}
+
+// ============================================================
+// ADMIN-04: User Administration & Profile
+// ============================================================
+
+export interface UserTeamAssignment {
+  teamId: string;
+  teamName: string;
+  role: string;
+  isPrimary: boolean;
+}
+
+export interface AdminUserDetail {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  phoneNumber?: string | null;
+  employeeCode?: string | null;
+  jobTitle?: string | null;
+  hireDate?: string | null;
+  profileImageUrl?: string | null;
+  isActive: boolean;
+  roles: string[];
+  permissions: string[];
+  departmentId?: string | null;
+  departmentName?: string | null;
+  teams: UserTeamAssignment[];
+  activeProjectsCount: number;
+  activeSitesCount: number;
+  createdAt: string;
+}
+
+export interface CreateUserAdminRequest {
+  email: string;
+  password?: string;
+  firstName: string;
+  lastName: string;
+  phoneNumber?: string;
+  employeeCode?: string;
+  jobTitle?: string;
+  hireDate?: string;
+  departmentId?: string;
+  roles?: string[];
+  permissions?: string[];
+}
+
+export interface UpdateUserAdminRequest {
+  firstName: string;
+  lastName: string;
+  phoneNumber?: string;
+  employeeCode?: string;
+  jobTitle?: string;
+  hireDate?: string;
+  departmentId?: string;
+  roles?: string[];
+  permissions?: string[];
+  isActive?: boolean;
+}
+
+export interface AssignUserDepartmentRequest {
+  departmentId: string;
+  role?: string;
+}
+
+export interface AssignUserTeamRequest {
+  teamId: string;
+  role?: string;
+  isPrimary?: boolean;
+}
+
+// ============================================================
+// UI-ORG-01 & UI-ORG-02: Batch Assignments
+// ============================================================
+
+export interface BatchAssignUsersRequest {
+  userIds: string[];
+  role: string;
+  isPrimary?: boolean;
+}
+
+export interface BatchAssignTeamsRequest {
+  teamIds: string[];
+  role: string;
+}
+
+// ============================================================
+// ORG-08: Workload Management
+// ============================================================
+
+export interface UserWorkload {
+  userId: string;
+  fullName: string;
+  email: string;
+  employeeCode?: string | null;
+  departmentName?: string | null;
+  activeProjects: number;
+  activeSites: number;
+  openTasks: number;
+  overdueTasks: number;
+  upcomingDeadlines: number;
+  assignedHours: number;
+  completedTasks: number;
+}
+
+export interface TeamWorkload {
+  teamId: string;
+  teamName: string;
+  teamCode: string;
+  managerName?: string | null;
+  membersCount: number;
+  activeProjects: number;
+  activeSites: number;
+  openTasks: number;
+  overdueTasks: number;
+  upcomingDeadlines: number;
+  assignedHours: number;
+  completedTasks: number;
+}
+
+export interface ProjectWorkload {
+  projectId: string;
+  projectName: string;
+  projectCode: string;
+  status: string;
+  membersCount: number;
+  teamsCount: number;
+  openTasks: number;
+  overdueTasks: number;
+  totalTasks: number;
+  completionPercentage: number;
+}
+
+// ============================================================
+// ORG-09: Temporary Responsibility Delegation
+// ============================================================
+
+export interface Delegation {
+  id: string;
+  userId: string;
+  userName?: string;
+  delegateUserId: string;
+  delegateUserName?: string;
+  scopeType: 'Global' | 'Project' | 'Site' | 'Team' | string;
+  scopeId?: string | null;
+  scopeName?: string | null;
+  permissions?: string | null;
+  startAt: string;
+  endAt: string;
+  createdBy?: string | null;
+  createdByName?: string | null;
+  createdAt: string;
+  isActive: boolean;
+  isExpired: boolean;
+}
+
+export interface CreateDelegationRequest {
+  userId: string;
+  delegateUserId: string;
+  scopeType: string;
+  scopeId?: string | null;
+  permissions?: string | null;
+  startAt: string;
+  endAt: string;
+}
+

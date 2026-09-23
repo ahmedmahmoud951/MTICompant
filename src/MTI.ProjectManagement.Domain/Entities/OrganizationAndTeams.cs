@@ -128,3 +128,36 @@ public class TeamMember : BaseEntity
     /// <summary>Whether this is the user's primary team</summary>
     public bool IsPrimaryTeam { get; set; } = false;
 }
+
+/// <summary>
+/// ORG-06: Responsibility Matrix (RACI) for Projects, Sites, Tasks, and Documents
+/// Responsibility Types: Responsible, Accountable, Consulted, Informed
+/// </summary>
+public class ResourceResponsibility : BaseEntity
+{
+    /// <summary>Type of resource: "Project", "Site", "Task", "Document"</summary>
+    public string ResourceType { get; set; } = "Project";
+
+    public Guid ResourceId { get; set; }
+
+    public Guid? UserId { get; set; }
+    public User? User { get; set; }
+
+    public Guid? TeamId { get; set; }
+    public Team? Team { get; set; }
+
+    /// <summary>Responsible, Accountable, Consulted, Informed</summary>
+    public string ResponsibilityType { get; set; } = "Responsible";
+
+    public Guid? AssignedBy { get; set; }
+    public User? AssignedByUser { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public bool IsActive { get; set; } = true;
+
+    /// <summary>Historical preservation timestamp</summary>
+    public DateTime? LeftAt { get; set; }
+
+    public string? Notes { get; set; }
+}

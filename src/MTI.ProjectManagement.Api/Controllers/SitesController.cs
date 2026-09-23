@@ -577,6 +577,118 @@ public class SitesController : ControllerBase
         return Ok(ApiResponse<bool>.Ok(true, "Team removed from site successfully (history preserved)."));
     }
 
+    [HttpPost("{id:guid}/members/batch")]
+    public async Task<ActionResult<ApiResponse<List<SiteMemberDto>>>> BatchAssignSiteMembers(Guid id, [FromBody] BatchAssignUsersRequest request)
+    {
+        if (!await CanManageSiteAsync(id)) return Forbid();
+
+        var site = await _context.Sites.Include(s => s.Project).FirstOrDefaultAsync(s => s.Id == id);
+        if (site == null) return NotFound(ApiResponse<List<SiteMemberDto>>.Fail("Site not found."));
+
+        var validUsers = await _context.Users
+            .Where(u => request.UserIds.Contains(u.Id) && u.IsActive && !u.IsDeleted)
+            .ToListAsync();
+
+        var resultList = new List<SiteMemberDto>();
+
+        foreach (var user in validUsers)
+        {
+            var existing = await _context.SiteMembers.FirstOrDefaultAsync(sm => sm.SiteId == id && sm.UserId == user.Id);
+            if (existing != null)
+            {
+                existing.SiteRole = request.Role;
+                existing.IsPrimary = request.IsPrimary;
+                existing.IsActive = true;
+                existing.RemovedAt = null;
+                resultList.Add(new SiteMemberDto(existing.Id, site.Id, site.Name, site.ProjectId, site.Project.Name, user.Id, user.FullName, user.Email, existing.SiteRole, existing.IsPrimary, existing.AssignedAt, existing.AssignedBy, null, existing.RemovedAt, existing.IsActive));
+            }
+            else
+            {
+                var member = new SiteMember
+                {
+                    SiteId = id,
+                    UserId = user.Id,
+                    SiteRole = request.Role,
+                    IsPrimary = request.IsPrimary,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = _currentUserService.UserId,
+                    IsActive = true
+                };
+                _context.SiteMembers.Add(member);
+
+                // Sync legacy SiteAssignments
+                var legacyExisting = await _context.SiteAssignments.FirstOrDefaultAsync(sa => sa.SiteId == id && sa.UserId == user.Id && sa.RemovedAt == null);
+                if (legacyExisting == null)
+                {
+                    _context.SiteAssignments.Add(new SiteAssignment
+                    {
+                        SiteId = id,
+                        UserId = user.Id,
+                        Role = request.Role,
+                        IsPrimary = request.IsPrimary,
+                        AssignedAt = DateTime.UtcNow,
+                        AssignedBy = _currentUserService.UserId
+                    });
+                }
+
+                resultList.Add(new SiteMemberDto(member.Id, site.Id, site.Name, site.ProjectId, site.Project.Name, user.Id, user.FullName, user.Email, member.SiteRole, member.IsPrimary, member.AssignedAt, member.AssignedBy, null, null, member.IsActive));
+            }
+        }
+
+        await _context.SaveChangesAsync();
+        await _auditService.LogAsync("BatchAssignSiteMembers", "SiteMember", id.ToString(), null, new { SiteId = id, UserCount = validUsers.Count, request.Role });
+
+        return Ok(ApiResponse<List<SiteMemberDto>>.Ok(resultList, $"{validUsers.Count} members assigned to site successfully."));
+    }
+
+    [HttpPost("{id:guid}/teams/batch")]
+    public async Task<ActionResult<ApiResponse<List<SiteTeamDto>>>> BatchAssignSiteTeams(Guid id, [FromBody] BatchAssignTeamsRequest request)
+    {
+        if (!await CanManageSiteAsync(id)) return Forbid();
+
+        var site = await _context.Sites.FindAsync(id);
+        if (site == null) return NotFound(ApiResponse<List<SiteTeamDto>>.Fail("Site not found."));
+
+        var validTeams = await _context.Teams
+            .Include(t => t.Members)
+            .Include(t => t.ManagerUser)
+            .Where(t => request.TeamIds.Contains(t.Id) && t.IsActive)
+            .ToListAsync();
+
+        var resultList = new List<SiteTeamDto>();
+
+        foreach (var team in validTeams)
+        {
+            var existing = await _context.SiteTeams.FirstOrDefaultAsync(st => st.SiteId == id && st.TeamId == team.Id);
+            if (existing != null)
+            {
+                existing.TeamRole = request.TeamRole;
+                existing.IsActive = true;
+                existing.RemovedAt = null;
+                resultList.Add(new SiteTeamDto(existing.Id, site.Id, site.Name, team.Id, team.Name, team.Code, team.ManagerUser?.FullName, existing.TeamRole, team.Members.Count(m => m.IsActive), existing.AssignedAt, existing.AssignedBy, null, existing.RemovedAt, existing.IsActive));
+            }
+            else
+            {
+                var siteTeam = new SiteTeam
+                {
+                    SiteId = id,
+                    TeamId = team.Id,
+                    TeamRole = request.TeamRole,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = _currentUserService.UserId,
+                    IsActive = true
+                };
+                _context.SiteTeams.Add(siteTeam);
+                resultList.Add(new SiteTeamDto(siteTeam.Id, site.Id, site.Name, team.Id, team.Name, team.Code, team.ManagerUser?.FullName, siteTeam.TeamRole, team.Members.Count(m => m.IsActive), siteTeam.AssignedAt, siteTeam.AssignedBy, null, null, siteTeam.IsActive));
+            }
+        }
+
+        await _context.SaveChangesAsync();
+        await _auditService.LogAsync("BatchAssignSiteTeams", "SiteTeam", id.ToString(), null, new { SiteId = id, TeamCount = validTeams.Count, request.TeamRole });
+
+        return Ok(ApiResponse<List<SiteTeamDto>>.Ok(resultList, $"{validTeams.Count} teams assigned to site successfully."));
+    }
+
     private async Task<bool> CanManageSiteAsync(Guid siteId)
     {
         if (_currentUserService.IsAdmin || _currentUserService.IsSystemAdmin || _currentUserService.Permissions.Contains(Permissions.SitesAssign))

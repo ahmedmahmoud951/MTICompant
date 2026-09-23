@@ -889,6 +889,116 @@ public class ProjectsController : ControllerBase
         return Ok(ApiResponse<bool>.SuccessResult(true, "تم إزالة فريق العمل من المشروع بنجاح"));
     }
 
+    // ==========================================
+    // UI-ORG-01: Multi-Select User & Team Batch Assignment
+    // ==========================================
+
+    [HttpPost("{id:guid}/members/batch")]
+    public async Task<ActionResult<ApiResponse<List<ProjectMemberDto>>>> BatchAssignMembers(Guid id, [FromBody] BatchAssignUsersRequest request)
+    {
+        if (!CanManageProjects(Permissions.ProjectsUpdate)) return Forbid();
+
+        var project = await _context.Projects.FindAsync(id);
+        if (project == null) return NotFound(ApiResponse<List<ProjectMemberDto>>.ErrorResult("المشروع غير موجود"));
+
+        var validUsers = await _context.Users
+            .Where(u => request.UserIds.Contains(u.Id) && u.IsActive && !u.IsDeleted)
+            .ToListAsync();
+
+        var resultList = new List<ProjectMemberDto>();
+
+        foreach (var user in validUsers)
+        {
+            var existing = await _context.ProjectMembers.FirstOrDefaultAsync(pm => pm.ProjectId == id && pm.UserId == user.Id);
+            if (existing != null)
+            {
+                existing.ProjectRole = request.Role;
+                existing.Role = request.Role;
+                existing.IsPrimary = request.IsPrimary;
+                existing.IsActive = true;
+                existing.RemovedAt = null;
+                resultList.Add(new ProjectMemberDto(existing.Id, project.Id, project.Name, user.Id, user.FullName, user.Email, existing.ProjectRole, existing.IsPrimary, existing.AssignedAt, existing.AssignedBy, null, existing.RemovedAt, existing.IsActive));
+            }
+            else
+            {
+                var member = new ProjectMember
+                {
+                    ProjectId = id,
+                    UserId = user.Id,
+                    ProjectRole = request.Role,
+                    Role = request.Role,
+                    IsPrimary = request.IsPrimary,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = _currentUserService.UserId,
+                    IsActive = true
+                };
+                _context.ProjectMembers.Add(member);
+                resultList.Add(new ProjectMemberDto(member.Id, project.Id, project.Name, user.Id, user.FullName, user.Email, member.ProjectRole, member.IsPrimary, member.AssignedAt, member.AssignedBy, null, null, member.IsActive));
+            }
+
+            await _notificationService.NotifyProjectAssignedAsync(project.Id, project.Name, user.Id);
+        }
+
+        await _context.SaveChangesAsync();
+        await _auditService.LogAsync("BatchAssignProjectMembers", "ProjectMember", id.ToString(), null, new { ProjectId = id, UserCount = validUsers.Count, request.Role });
+
+        return Ok(ApiResponse<List<ProjectMemberDto>>.SuccessResult(resultList, $"تم إسناد {validUsers.Count} عضو إلى المشروع بنجاح"));
+    }
+
+    [HttpPost("{id:guid}/teams/batch")]
+    public async Task<ActionResult<ApiResponse<List<ProjectTeamDto>>>> BatchAssignTeams(Guid id, [FromBody] BatchAssignTeamsRequest request)
+    {
+        if (!CanManageProjects(Permissions.ProjectsUpdate)) return Forbid();
+
+        var project = await _context.Projects.FindAsync(id);
+        if (project == null) return NotFound(ApiResponse<List<ProjectTeamDto>>.ErrorResult("المشروع غير موجود"));
+
+        var validTeams = await _context.Teams
+            .Include(t => t.Members)
+            .Include(t => t.ManagerUser)
+            .Where(t => request.TeamIds.Contains(t.Id) && t.IsActive)
+            .ToListAsync();
+
+        var resultList = new List<ProjectTeamDto>();
+
+        foreach (var team in validTeams)
+        {
+            var existing = await _context.ProjectTeams.FirstOrDefaultAsync(pt => pt.ProjectId == id && pt.TeamId == team.Id);
+            if (existing != null)
+            {
+                existing.TeamRole = request.TeamRole;
+                existing.IsActive = true;
+                existing.RemovedAt = null;
+                resultList.Add(new ProjectTeamDto(existing.Id, project.Id, project.Name, team.Id, team.Name, team.Code, team.ManagerUser?.FullName, existing.TeamRole, team.Members.Count(m => m.IsActive), existing.AssignedAt, existing.AssignedBy, null, existing.RemovedAt, existing.IsActive));
+            }
+            else
+            {
+                var pt = new ProjectTeam
+                {
+                    ProjectId = id,
+                    TeamId = team.Id,
+                    TeamRole = request.TeamRole,
+                    AssignedAt = DateTime.UtcNow,
+                    AssignedBy = _currentUserService.UserId,
+                    IsActive = true
+                };
+                _context.ProjectTeams.Add(pt);
+                resultList.Add(new ProjectTeamDto(pt.Id, project.Id, project.Name, team.Id, team.Name, team.Code, team.ManagerUser?.FullName, pt.TeamRole, team.Members.Count(m => m.IsActive), pt.AssignedAt, pt.AssignedBy, null, null, pt.IsActive));
+            }
+
+            // Notify active team members
+            foreach (var memberId in team.Members.Where(m => m.IsActive).Select(m => m.UserId))
+            {
+                await _notificationService.NotifyProjectAssignedAsync(project.Id, project.Name, memberId);
+            }
+        }
+
+        await _context.SaveChangesAsync();
+        await _auditService.LogAsync("BatchAssignProjectTeams", "ProjectTeam", id.ToString(), null, new { ProjectId = id, TeamCount = validTeams.Count, request.TeamRole });
+
+        return Ok(ApiResponse<List<ProjectTeamDto>>.SuccessResult(resultList, $"تم إسناد {validTeams.Count} فريق إلى المشروع بنجاح"));
+    }
+
     /// <summary>
     /// Admin / SystemAdmin / ProjectManager, or explicit permission claim.
     /// Uses both ICurrentUserService and raw claims so it works on any device/network after publish.

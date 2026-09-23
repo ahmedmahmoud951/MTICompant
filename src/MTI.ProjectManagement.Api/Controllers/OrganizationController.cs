@@ -840,4 +840,545 @@ public class OrganizationController : ControllerBase
 
         return Ok(ApiResponse<OrganizationRolesDto>.SuccessResult(roles));
     }
+
+    // ==========================================
+    // 6. ORG-06: RACI Responsibility Matrix
+    // ==========================================
+
+    [HttpGet("raci/{resourceType}/{resourceId:guid}")]
+    public async Task<ActionResult<ApiResponse<RaciMatrixDto>>> GetRaciMatrix(string resourceType, Guid resourceId)
+    {
+        var responsibilities = await _context.ResourceResponsibilities
+            .Include(r => r.User)
+            .Include(r => r.Team)
+            .Include(r => r.AssignedByUser)
+            .Where(r => r.ResourceType.ToLower() == resourceType.ToLower() && r.ResourceId == resourceId && r.IsActive)
+            .ToListAsync();
+
+        string? resourceName = null;
+        if (resourceType.Equals("Project", StringComparison.OrdinalIgnoreCase))
+        {
+            resourceName = await _context.Projects.Where(p => p.Id == resourceId).Select(p => p.Name).FirstOrDefaultAsync();
+        }
+        else if (resourceType.Equals("Site", StringComparison.OrdinalIgnoreCase))
+        {
+            resourceName = await _context.Sites.Where(s => s.Id == resourceId).Select(s => s.Name).FirstOrDefaultAsync();
+        }
+
+        var dtos = responsibilities.Select(r => new ResourceResponsibilityDto(
+            r.Id,
+            r.ResourceType,
+            r.ResourceId,
+            resourceName,
+            r.UserId,
+            r.User?.FullName,
+            r.User?.Email,
+            r.TeamId,
+            r.Team?.Name,
+            r.ResponsibilityType,
+            r.AssignedBy,
+            r.AssignedByUser?.FullName,
+            r.CreatedAt,
+            r.IsActive,
+            r.Notes
+        )).ToList();
+
+        var matrix = new RaciMatrixDto(
+            resourceId,
+            resourceType,
+            resourceName,
+            dtos.Where(d => d.ResponsibilityType.Equals("Responsible", StringComparison.OrdinalIgnoreCase)).ToList(),
+            dtos.Where(d => d.ResponsibilityType.Equals("Accountable", StringComparison.OrdinalIgnoreCase)).ToList(),
+            dtos.Where(d => d.ResponsibilityType.Equals("Consulted", StringComparison.OrdinalIgnoreCase)).ToList(),
+            dtos.Where(d => d.ResponsibilityType.Equals("Informed", StringComparison.OrdinalIgnoreCase)).ToList()
+        );
+
+        return Ok(ApiResponse<RaciMatrixDto>.SuccessResult(matrix));
+    }
+
+    [HttpPost("raci")]
+    public async Task<ActionResult<ApiResponse<ResourceResponsibilityDto>>> AssignResponsibility([FromBody] AssignResponsibilityRequest request)
+    {
+        if (!request.UserId.HasValue && !request.TeamId.HasValue)
+        {
+            return BadRequest(ApiResponse<ResourceResponsibilityDto>.ErrorResult("يجب تحديد مستخدم أو فريق للإسناد"));
+        }
+
+        var responsibility = new ResourceResponsibility
+        {
+            ResourceType = request.ResourceType,
+            ResourceId = request.ResourceId,
+            UserId = request.UserId,
+            TeamId = request.TeamId,
+            ResponsibilityType = request.ResponsibilityType,
+            AssignedBy = _currentUserService.UserId,
+            Notes = request.Notes,
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+
+        _context.ResourceResponsibilities.Add(responsibility);
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogAsync("AssignRaciResponsibility", "ResourceResponsibility", responsibility.Id.ToString(), null, new
+        {
+            responsibility.ResourceType,
+            responsibility.ResourceId,
+            responsibility.UserId,
+            responsibility.TeamId,
+            responsibility.ResponsibilityType
+        });
+
+        var user = request.UserId.HasValue ? await _context.Users.FindAsync(request.UserId.Value) : null;
+        var team = request.TeamId.HasValue ? await _context.Teams.FindAsync(request.TeamId.Value) : null;
+
+        var dto = new ResourceResponsibilityDto(
+            responsibility.Id,
+            responsibility.ResourceType,
+            responsibility.ResourceId,
+            null,
+            responsibility.UserId,
+            user?.FullName,
+            user?.Email,
+            responsibility.TeamId,
+            team?.Name,
+            responsibility.ResponsibilityType,
+            responsibility.AssignedBy,
+            null,
+            responsibility.CreatedAt,
+            responsibility.IsActive,
+            responsibility.Notes
+        );
+
+        return Ok(ApiResponse<ResourceResponsibilityDto>.SuccessResult(dto, "تم إسناد المسؤولية بنجاح"));
+    }
+
+    [HttpDelete("raci/{id:guid}")]
+    public async Task<ActionResult<ApiResponse<bool>>> RemoveResponsibility(Guid id)
+    {
+        var item = await _context.ResourceResponsibilities.FindAsync(id);
+        if (item == null) return NotFound(ApiResponse<bool>.ErrorResult("المسؤولية غير موجودة"));
+
+        // Historical preservation: soft inactive
+        item.IsActive = false;
+        item.LeftAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        await _auditService.LogAsync("RemoveRaciResponsibility", "ResourceResponsibility", id.ToString());
+
+        return Ok(ApiResponse<bool>.SuccessResult(true, "تم إنهاء المسؤولية بنجاح مع حفظ السجل التاريخي"));
+    }
+
+    // ==========================================
+    // 7. ORG-07: Team Manager Scoped Operations
+    // ==========================================
+
+    [HttpGet("teams/{teamId:guid}/manager-scope")]
+    public async Task<ActionResult<ApiResponse<object>>> GetTeamManagerScope(Guid teamId)
+    {
+        var team = await _context.Teams
+            .Include(t => t.Department)
+            .Include(t => t.ManagerUser)
+            .Include(t => t.Members).ThenInclude(m => m.User)
+            .FirstOrDefaultAsync(t => t.Id == teamId);
+
+        if (team == null) return NotFound(ApiResponse<object>.ErrorResult("الفريق غير موجود"));
+
+        var isTeamManager = _currentUserService.UserId.HasValue &&
+            (team.ManagerUserId == _currentUserService.UserId.Value ||
+             team.AssistantManagerUserId == _currentUserService.UserId.Value ||
+             team.SupervisorUserId == _currentUserService.UserId.Value ||
+             _currentUserService.IsAdmin ||
+             _currentUserService.IsSystemAdmin);
+
+        if (!isTeamManager) return Forbid();
+
+        var memberUserIds = team.Members.Where(m => m.IsActive).Select(m => m.UserId).ToList();
+
+        // Assigned projects for this team
+        var assignedProjects = await _context.ProjectTeams
+            .Include(pt => pt.Project)
+            .Where(pt => pt.TeamId == teamId && pt.IsActive)
+            .Select(pt => new
+            {
+                pt.ProjectId,
+                pt.Project.Code,
+                pt.Project.Name,
+                pt.Project.Status,
+                pt.TeamRole,
+                pt.AssignedAt
+            })
+            .ToListAsync();
+
+        // Assigned sites for this team
+        var assignedSites = await _context.SiteTeams
+            .Include(st => st.Site).ThenInclude(s => s.Project)
+            .Where(st => st.TeamId == teamId && st.IsActive)
+            .Select(st => new
+            {
+                st.SiteId,
+                st.Site.Code,
+                st.Site.Name,
+                st.Site.ProjectId,
+                ProjectName = st.Site.Project.Name,
+                st.Site.Status,
+                st.TeamRole,
+                st.AssignedAt
+            })
+            .ToListAsync();
+
+        // Tasks assigned to team members
+        var teamTasks = await _context.Tasks
+            .Include(t => t.Project)
+            .Where(t => memberUserIds.Contains(t.AssigneeId ?? Guid.Empty) && !t.IsDeleted)
+            .OrderByDescending(t => t.CreatedAt)
+            .Take(50)
+            .Select(t => new
+            {
+                t.Id,
+                t.Title,
+                t.Status,
+                t.Priority,
+                t.AssigneeId,
+                AssigneeName = t.Assignee != null ? t.Assignee.FullName : null,
+                t.ProjectId,
+                ProjectName = t.Project != null ? t.Project.Name : null,
+                t.DueDate,
+                IsOverdue = t.DueDate.HasValue && t.DueDate.Value < DateTime.UtcNow && t.Status != Domain.Enums.TaskItemStatus.Completed
+            })
+            .ToListAsync();
+
+        return Ok(ApiResponse<object>.SuccessResult(new
+        {
+            Team = new
+            {
+                team.Id,
+                team.Name,
+                team.Code,
+                DepartmentName = team.Department.NameAr,
+                ManagerName = team.ManagerUser?.FullName,
+                MembersCount = team.Members.Count(m => m.IsActive)
+            },
+            AssignedProjects = assignedProjects,
+            AssignedSites = assignedSites,
+            RecentTasks = teamTasks
+        }));
+    }
+
+    // ==========================================
+    // 8. ORG-08: Workload Management
+    // ==========================================
+
+    [HttpGet("workload/users")]
+    public async Task<ActionResult<ApiResponse<List<UserWorkloadDto>>>> GetUsersWorkload(
+        [FromQuery] Guid? departmentId = null,
+        [FromQuery] Guid? teamId = null)
+    {
+        var usersQuery = _context.Users.AsNoTracking().Where(u => u.IsActive && !u.IsDeleted);
+
+        if (departmentId.HasValue)
+        {
+            var deptUserIds = await _context.DepartmentMembers
+                .Where(dm => dm.DepartmentId == departmentId.Value && dm.IsActive)
+                .Select(dm => dm.UserId)
+                .ToListAsync();
+            usersQuery = usersQuery.Where(u => deptUserIds.Contains(u.Id));
+        }
+
+        if (teamId.HasValue)
+        {
+            var teamUserIds = await _context.TeamMembers
+                .Where(tm => tm.TeamId == teamId.Value && tm.IsActive)
+                .Select(tm => tm.UserId)
+                .ToListAsync();
+            usersQuery = usersQuery.Where(u => teamUserIds.Contains(u.Id));
+        }
+
+        var users = await usersQuery.ToListAsync();
+        var userIds = users.Select(u => u.Id).ToList();
+
+        var now = DateTime.UtcNow;
+
+        var projectCounts = await _context.ProjectMembers
+            .Where(pm => userIds.Contains(pm.UserId) && pm.IsActive && pm.RemovedAt == null)
+            .GroupBy(pm => pm.UserId)
+            .Select(g => new { UserId = g.Key, Count = g.Select(x => x.ProjectId).Distinct().Count() })
+            .ToDictionaryAsync(x => x.UserId, x => x.Count);
+
+        var siteCounts = await _context.SiteMembers
+            .Where(sm => userIds.Contains(sm.UserId) && sm.IsActive && sm.RemovedAt == null)
+            .GroupBy(sm => sm.UserId)
+            .Select(g => new { UserId = g.Key, Count = g.Select(x => x.SiteId).Distinct().Count() })
+            .ToDictionaryAsync(x => x.UserId, x => x.Count);
+
+        var tasksStats = await _context.Tasks
+            .Where(t => userIds.Contains(t.AssigneeId ?? Guid.Empty) && !t.IsDeleted)
+            .GroupBy(t => t.AssigneeId!.Value)
+            .Select(g => new
+            {
+                UserId = g.Key,
+                Open = g.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.Status != Domain.Enums.TaskItemStatus.Cancelled),
+                Completed = g.Count(x => x.Status == Domain.Enums.TaskItemStatus.Completed),
+                Overdue = g.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueDate.HasValue && x.DueDate.Value < now),
+                UpcomingDeadlines = g.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueDate.HasValue && x.DueDate.Value >= now && x.DueDate.Value <= now.AddDays(7))
+            })
+            .ToDictionaryAsync(x => x.UserId, x => x);
+
+        var list = users.Select(u =>
+        {
+            projectCounts.TryGetValue(u.Id, out var pCount);
+            siteCounts.TryGetValue(u.Id, out var sCount);
+            tasksStats.TryGetValue(u.Id, out var tStat);
+
+            return new UserWorkloadDto(
+                u.Id,
+                u.FullName,
+                u.Email,
+                u.JobTitle,
+                null,
+                pCount,
+                sCount,
+                tStat?.Open ?? 0,
+                tStat?.Overdue ?? 0,
+                tStat?.UpcomingDeadlines ?? 0,
+                0,
+                tStat?.Completed ?? 0
+            );
+        }).OrderByDescending(w => w.OpenTasksCount).ToList();
+
+        return Ok(ApiResponse<List<UserWorkloadDto>>.SuccessResult(list));
+    }
+
+    [HttpGet("workload/teams")]
+    public async Task<ActionResult<ApiResponse<List<TeamWorkloadDto>>>> GetTeamsWorkload([FromQuery] Guid? departmentId = null)
+    {
+        var teamsQuery = _context.Teams
+            .Include(t => t.ManagerUser)
+            .Include(t => t.Members).ThenInclude(m => m.User)
+            .Where(t => t.IsActive);
+
+        if (departmentId.HasValue)
+        {
+            teamsQuery = teamsQuery.Where(t => t.DepartmentId == departmentId.Value);
+        }
+
+        var teams = await teamsQuery.ToListAsync();
+        var now = DateTime.UtcNow;
+
+        var teamList = new List<TeamWorkloadDto>();
+
+        foreach (var team in teams)
+        {
+            var memberIds = team.Members.Where(m => m.IsActive).Select(m => m.UserId).ToList();
+
+            var activeProjectsCount = await _context.ProjectTeams
+                .Where(pt => pt.TeamId == team.Id && pt.IsActive && pt.RemovedAt == null)
+                .Select(pt => pt.ProjectId)
+                .Distinct()
+                .CountAsync();
+
+            var activeSitesCount = await _context.SiteTeams
+                .Where(st => st.TeamId == team.Id && st.IsActive && st.RemovedAt == null)
+                .Select(st => st.SiteId)
+                .Distinct()
+                .CountAsync();
+
+            var teamTasks = await _context.Tasks
+                .Where(t => memberIds.Contains(t.AssigneeId ?? Guid.Empty) && !t.IsDeleted)
+                .ToListAsync();
+
+            var openTasks = teamTasks.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.Status != Domain.Enums.TaskItemStatus.Cancelled);
+            var overdueTasks = teamTasks.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueDate.HasValue && x.DueDate.Value < now);
+            var completedTasks = teamTasks.Count(x => x.Status == Domain.Enums.TaskItemStatus.Completed);
+
+            teamList.Add(new TeamWorkloadDto(
+                team.Id,
+                team.Name,
+                team.Code,
+                team.ManagerUser?.FullName,
+                memberIds.Count,
+                activeProjectsCount,
+                activeSitesCount,
+                openTasks,
+                overdueTasks,
+                completedTasks,
+                new List<UserWorkloadDto>()
+            ));
+        }
+
+        return Ok(ApiResponse<List<TeamWorkloadDto>>.SuccessResult(teamList.OrderByDescending(t => t.OpenTasksCount).ToList()));
+    }
+
+    [HttpGet("workload/projects")]
+    public async Task<ActionResult<ApiResponse<List<ProjectWorkloadDto>>>> GetProjectsWorkload()
+    {
+        var now = DateTime.UtcNow;
+        var projects = await _context.Projects
+            .Where(p => !p.IsDeleted)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new ProjectWorkloadDto(
+                p.Id,
+                p.Name,
+                p.Code,
+                p.Members.Count(m => m.IsActive && m.RemovedAt == null),
+                p.Teams.Count(t => t.IsActive && t.RemovedAt == null),
+                p.Tasks.Count(t => !t.IsDeleted),
+                p.Tasks.Count(t => !t.IsDeleted && t.Status != Domain.Enums.TaskItemStatus.Completed && t.Status != Domain.Enums.TaskItemStatus.Cancelled),
+                p.Tasks.Count(t => !t.IsDeleted && t.Status != Domain.Enums.TaskItemStatus.Completed && t.DueDate.HasValue && t.DueDate.Value < now),
+                p.Tasks.Count(t => !t.IsDeleted && t.Status == Domain.Enums.TaskItemStatus.Completed)
+            ))
+            .ToListAsync();
+
+        return Ok(ApiResponse<List<ProjectWorkloadDto>>.SuccessResult(projects));
+    }
+
+    // ==========================================
+    // 9. ORG-09: Temporary Responsibility Delegation
+    // ==========================================
+
+    [HttpGet("delegations")]
+    public async Task<ActionResult<ApiResponse<List<DelegationDto>>>> GetDelegations(
+        [FromQuery] string? scopeType = null,
+        [FromQuery] Guid? scopeId = null,
+        [FromQuery] Guid? delegateUserId = null)
+    {
+        var query = _context.Delegations
+            .Include(d => d.User)
+            .Include(d => d.DelegateUser)
+            .Include(d => d.CreatedByUser)
+            .Where(d => d.IsActive)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(scopeType))
+        {
+            query = query.Where(d => d.ScopeType.ToLower() == scopeType.ToLower());
+        }
+
+        if (scopeId.HasValue)
+        {
+            query = query.Where(d => d.ScopeId == scopeId.Value);
+        }
+
+        if (delegateUserId.HasValue)
+        {
+            query = query.Where(d => d.DelegateUserId == delegateUserId.Value);
+        }
+
+        var delegations = await query.OrderByDescending(d => d.CreatedAt).ToListAsync();
+        var now = DateTime.UtcNow;
+
+        var dtos = delegations.Select(d => new DelegationDto(
+            d.Id,
+            d.UserId,
+            d.User.FullName,
+            d.User.Email,
+            d.DelegateUserId,
+            d.DelegateUser.FullName,
+            d.DelegateUser.Email,
+            d.ScopeType,
+            d.ScopeId,
+            null,
+            d.Role,
+            d.Permissions,
+            d.StartAt,
+            d.EndAt,
+            d.CreatedBy,
+            d.CreatedByUser?.FullName,
+            d.CreatedAt,
+            d.IsActive,
+            d.IsCurrentlyActive,
+            d.Reason
+        )).ToList();
+
+        return Ok(ApiResponse<List<DelegationDto>>.SuccessResult(dtos));
+    }
+
+    [HttpPost("delegations")]
+    public async Task<ActionResult<ApiResponse<DelegationDto>>> CreateDelegation([FromBody] CreateDelegationRequest request)
+    {
+        if (request.StartAt >= request.EndAt)
+        {
+            return BadRequest(ApiResponse<DelegationDto>.ErrorResult("تاريخ البداية يجب أن يكون قبل تاريخ الانتهاء"));
+        }
+
+        var delegatorId = _currentUserService.UserId;
+        if (!delegatorId.HasValue) return Unauthorized();
+
+        var delegateUser = await _context.Users.FindAsync(request.DelegateUserId);
+        if (delegateUser == null || !delegateUser.IsActive)
+        {
+            return BadRequest(ApiResponse<DelegationDto>.ErrorResult("المستخدم المفوض إليه غير صالح أو معطل"));
+        }
+
+        var delegation = new Delegation
+        {
+            UserId = delegatorId.Value,
+            DelegateUserId = request.DelegateUserId,
+            ScopeType = request.ScopeType,
+            ScopeId = request.ScopeId,
+            Role = request.Role,
+            Permissions = request.Permissions != null ? System.Text.Json.JsonSerializer.Serialize(request.Permissions) : null,
+            StartAt = request.StartAt,
+            EndAt = request.EndAt,
+            Reason = request.Reason,
+            CreatedBy = delegatorId.Value,
+            CreatedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+
+        _context.Delegations.Add(delegation);
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogAsync("CreateDelegation", "Delegation", delegation.Id.ToString(), null, new
+        {
+            delegation.UserId,
+            delegation.DelegateUserId,
+            delegation.ScopeType,
+            delegation.ScopeId,
+            delegation.StartAt,
+            delegation.EndAt
+        });
+
+        var delegatorUser = await _context.Users.FindAsync(delegatorId.Value);
+
+        var dto = new DelegationDto(
+            delegation.Id,
+            delegation.UserId,
+            delegatorUser?.FullName ?? "",
+            delegatorUser?.Email ?? "",
+            delegation.DelegateUserId,
+            delegateUser.FullName,
+            delegateUser.Email,
+            delegation.ScopeType,
+            delegation.ScopeId,
+            null,
+            delegation.Role,
+            delegation.Permissions,
+            delegation.StartAt,
+            delegation.EndAt,
+            delegation.CreatedBy,
+            delegatorUser?.FullName,
+            delegation.CreatedAt,
+            delegation.IsActive,
+            delegation.IsCurrentlyActive,
+            delegation.Reason
+        );
+
+        return Ok(ApiResponse<DelegationDto>.SuccessResult(dto, "تم إنشاء التفويض بنجاح"));
+    }
+
+    [HttpDelete("delegations/{id:guid}")]
+    public async Task<ActionResult<ApiResponse<bool>>> RevokeDelegation(Guid id)
+    {
+        var delegation = await _context.Delegations.FindAsync(id);
+        if (delegation == null) return NotFound(ApiResponse<bool>.ErrorResult("التفويض غير موجود"));
+
+        delegation.IsActive = false;
+        delegation.RevokedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        await _auditService.LogAsync("RevokeDelegation", "Delegation", id.ToString());
+
+        return Ok(ApiResponse<bool>.SuccessResult(true, "تم إلغاء التفويض بنجاح"));
+    }
 }

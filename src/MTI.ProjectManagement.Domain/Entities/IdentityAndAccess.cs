@@ -10,6 +10,7 @@ public class User : FullAuditedEntity
     public string LastName { get; set; } = string.Empty;
     public string? PhoneNumber { get; set; }
     public string? JobTitle { get; set; }
+    public string? EmployeeCode { get; set; }
     public bool IsActive { get; set; } = true;
     public DateTime? LockoutEnd { get; set; }
     public int AccessFailedCount { get; set; }
@@ -26,6 +27,8 @@ public class User : FullAuditedEntity
     public UserProfile? UserProfile { get; set; }
     public UserPreference? UserPreference { get; set; }
     public ICollection<UserSession> UserSessions { get; set; } = new List<UserSession>();
+    public ICollection<Delegation> GivenDelegations { get; set; } = new List<Delegation>();
+    public ICollection<Delegation> ReceivedDelegations { get; set; } = new List<Delegation>();
 }
 
 public class Role : BaseEntity
@@ -116,6 +119,11 @@ public class UserProfile : FullAuditedEntity
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;
 
+    public string? EmployeeCode { get; set; }
+    public DateTime? HireDate { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Department? Department { get; set; }
+
     public string? Bio { get; set; }
     public string? ProfilePictureUrl { get; set; }
     public string? PhoneNumber2 { get; set; }
@@ -124,6 +132,47 @@ public class UserProfile : FullAuditedEntity
     public DateTime? BirthDate { get; set; }
     public string? SkillsJson { get; set; } = "[]";
     public string? EmergencyContact { get; set; }
+}
+
+public class MasterDataItem : BaseEntity
+{
+    public string Category { get; set; } = string.Empty; // e.g. "TeamRole", "ProjectRole", "ProjectType"
+    public string Code { get; set; } = string.Empty;
+    public string NameAr { get; set; } = string.Empty;
+    public string NameEn { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public int DisplayOrder { get; set; } = 0;
+    public bool IsSystem { get; set; } = false;
+    public bool IsActive { get; set; } = true;
+    public string? MetadataJson { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? UpdatedAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public User? CreatedByUser { get; set; }
+}
+
+public class Delegation : BaseEntity
+{
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+
+    public Guid DelegateUserId { get; set; }
+    public User DelegateUser { get; set; } = null!;
+
+    public string ScopeType { get; set; } = "Project"; // "Project", "Site", "Department", "Global"
+    public Guid? ScopeId { get; set; }
+    public string? Role { get; set; }
+    public string? Permissions { get; set; } // JSON array of permissions e.g. ["Projects.Manage", "Sites.Approve"]
+    public DateTime StartAt { get; set; }
+    public DateTime EndAt { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public User? CreatedByUser { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsActive { get; set; } = true;
+    public DateTime? RevokedAt { get; set; }
+    public string? Reason { get; set; }
+
+    public bool IsCurrentlyActive => IsActive && RevokedAt == null && DateTime.UtcNow >= StartAt && DateTime.UtcNow <= EndAt;
 }
 
 public class UserSession : BaseEntity

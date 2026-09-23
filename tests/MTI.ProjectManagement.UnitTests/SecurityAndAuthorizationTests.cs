@@ -253,4 +253,142 @@ public class SecurityAndAuthorizationTests
         Assert.Contains(siteAId, authorizedSiteIds);
         Assert.DoesNotContain(siteBId, authorizedSiteIds);
     }
+
+    [Fact]
+    public void Org06_RaciMatrix_TracksAllResponsibilityTypes()
+    {
+        var projectId = Guid.NewGuid();
+        var engineerId = Guid.NewGuid();
+        var pmId = Guid.NewGuid();
+        var toTeamId = Guid.NewGuid();
+        var accUserId = Guid.NewGuid();
+
+        var responsible = new ResourceResponsibility
+        {
+            ResourceType = "Project",
+            ResourceId = projectId,
+            UserId = engineerId,
+            ResponsibilityType = "Responsible",
+            IsActive = true
+        };
+
+        var accountable = new ResourceResponsibility
+        {
+            ResourceType = "Project",
+            ResourceId = projectId,
+            UserId = pmId,
+            ResponsibilityType = "Accountable",
+            IsActive = true
+        };
+
+        var consulted = new ResourceResponsibility
+        {
+            ResourceType = "Project",
+            ResourceId = projectId,
+            TeamId = toTeamId,
+            ResponsibilityType = "Consulted",
+            IsActive = true
+        };
+
+        var informed = new ResourceResponsibility
+        {
+            ResourceType = "Project",
+            ResourceId = projectId,
+            UserId = accUserId,
+            ResponsibilityType = "Informed",
+            IsActive = true
+        };
+
+        Assert.Equal("Responsible", responsible.ResponsibilityType);
+        Assert.Equal("Accountable", accountable.ResponsibilityType);
+        Assert.Equal("Consulted", consulted.ResponsibilityType);
+        Assert.Equal("Informed", informed.ResponsibilityType);
+    }
+
+    [Fact]
+    public void Admin02_And_Admin03_MasterDataAndControlledSoftDelete()
+    {
+        var item = new MasterDataItem
+        {
+            Id = Guid.NewGuid(),
+            Category = "ProjectRole",
+            Code = "BIMEngineer",
+            NameAr = "مهندس نمذجة",
+            NameEn = "BIM Engineer",
+            IsSystem = false,
+            IsActive = true
+        };
+
+        Assert.True(item.IsActive);
+
+        // Controlled soft deletion preserves historical integrity
+        item.IsActive = false;
+        item.UpdatedAt = DateTime.UtcNow;
+
+        Assert.False(item.IsActive);
+        Assert.NotNull(item.UpdatedAt);
+    }
+
+    [Fact]
+    public void Admin04_JobTitleIsNotAuthorization_AuthorizationComesFromRolesAndPermissions()
+    {
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Email = "architect@mti.com",
+            FirstName = "Kareem",
+            LastName = "Ali",
+            JobTitle = "Senior Vice President of Engineering", // High title
+            EmployeeCode = "MTI-EMP-104",
+            IsActive = true
+        };
+
+        // JobTitle alone grants no roles or permissions
+        var roles = user.UserRoles.Select(ur => ur.Role.Name).ToList();
+        Assert.Empty(roles);
+
+        // Authorization explicitly granted via Role
+        var engineerRole = new Role { Id = Guid.NewGuid(), Name = "Engineer" };
+        user.UserRoles.Add(new UserRole { UserId = user.Id, Role = engineerRole, RoleId = engineerRole.Id });
+
+        Assert.Single(user.UserRoles);
+        Assert.Equal("Engineer", user.UserRoles.First().Role.Name);
+    }
+
+    [Fact]
+    public void Org09_TemporaryDelegation_ExpiresAutomaticallyWithoutChangingCoreRole()
+    {
+        var delegatorPm = Guid.NewGuid();
+        var backupEngineer = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+
+        var activeDelegation = new Delegation
+        {
+            Id = Guid.NewGuid(),
+            UserId = delegatorPm,
+            DelegateUserId = backupEngineer,
+            ScopeType = "Project",
+            ScopeId = projectId,
+            Role = "ProjectManager",
+            StartAt = DateTime.UtcNow.AddHours(-1),
+            EndAt = DateTime.UtcNow.AddHours(5),
+            IsActive = true
+        };
+
+        var expiredDelegation = new Delegation
+        {
+            Id = Guid.NewGuid(),
+            UserId = delegatorPm,
+            DelegateUserId = backupEngineer,
+            ScopeType = "Project",
+            ScopeId = projectId,
+            Role = "ProjectManager",
+            StartAt = DateTime.UtcNow.AddDays(-5),
+            EndAt = DateTime.UtcNow.AddDays(-1),
+            IsActive = true
+        };
+
+        Assert.True(activeDelegation.IsCurrentlyActive);
+        Assert.False(expiredDelegation.IsCurrentlyActive);
+    }
 }
