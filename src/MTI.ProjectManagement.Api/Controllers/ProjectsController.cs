@@ -411,99 +411,6 @@ public class ProjectsController : ControllerBase
         return Ok(ApiResponse<SiteDto>.Ok(dto, "Site created successfully."));
     }
 
-    [HttpGet("{id:guid}/members")]
-    public async Task<ActionResult<ApiResponse<List<ProjectMemberDto>>>> GetProjectMembers(Guid id)
-    {
-        var userId = _currentUserService.UserId;
-        if (!userId.HasValue) return Unauthorized();
-
-        var hasAccess = await _resourceAuthorizationService.CanAccessProjectAsync(userId.Value, id);
-        if (!hasAccess) return Forbid();
-
-        var members = await _context.ProjectMembers
-            .AsNoTracking()
-            .Include(pm => pm.User)
-            .Where(pm => pm.ProjectId == id)
-            .OrderBy(pm => pm.User.FirstName)
-            .Select(pm => new ProjectMemberDto(
-                pm.Id,
-                pm.ProjectId,
-                pm.UserId,
-                pm.User.FirstName + " " + pm.User.LastName,
-                pm.User.Email,
-                pm.Role,
-                pm.JoinedAt
-            ))
-            .ToListAsync();
-
-        return Ok(ApiResponse<List<ProjectMemberDto>>.Ok(members));
-    }
-
-    [HttpPost("{id:guid}/members")]
-    public async Task<ActionResult<ApiResponse<ProjectMemberDto>>> AssignProjectMember(Guid id, [FromBody] AssignProjectMemberRequest request)
-    {
-        if (!_currentUserService.IsAdmin && !_currentUserService.IsSystemAdmin && !_currentUserService.Permissions.Contains(Permissions.ProjectsUpdate))
-        {
-            return Forbid();
-        }
-
-        var project = await _context.Projects.FindAsync(id);
-        if (project == null) return NotFound(ApiResponse<ProjectMemberDto>.Fail("Project not found."));
-
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == request.UserId && !u.IsDeleted && u.IsActive);
-        if (user == null) return BadRequest(ApiResponse<ProjectMemberDto>.Fail("User is invalid or inactive."));
-
-        var existing = await _context.ProjectMembers.FirstOrDefaultAsync(pm => pm.ProjectId == id && pm.UserId == request.UserId);
-        if (existing != null)
-        {
-            existing.Role = string.IsNullOrWhiteSpace(request.Role) ? existing.Role : request.Role;
-            await _context.SaveChangesAsync();
-            var existingDto = new ProjectMemberDto(existing.Id, existing.ProjectId, existing.UserId, user.FullName, user.Email, existing.Role, existing.JoinedAt);
-            return Ok(ApiResponse<ProjectMemberDto>.Ok(existingDto, "Member already assigned."));
-        }
-
-        var member = new ProjectMember
-        {
-            ProjectId = id,
-            UserId = request.UserId,
-            Role = string.IsNullOrWhiteSpace(request.Role) ? "Engineer" : request.Role,
-            JoinedAt = DateTime.UtcNow
-        };
-        _context.ProjectMembers.Add(member);
-        await _context.SaveChangesAsync();
-
-        await _notificationService.NotifyProjectAssignedAsync(
-            project.Id, project.Name, request.UserId);
-
-        await _notificationService.BroadcastToUserAsync(
-            request.UserId,
-            "ProjectAssigned",
-            new { projectId = project.Id, name = project.Name });
-
-        await _auditService.LogAsync("AssignProjectMember", "ProjectMember", member.Id.ToString(), null, member);
-
-        var dto = new ProjectMemberDto(member.Id, member.ProjectId, member.UserId, user.FullName, user.Email, member.Role, member.JoinedAt);
-        return Ok(ApiResponse<ProjectMemberDto>.Ok(dto, "User assigned to project."));
-    }
-
-    [HttpDelete("{id:guid}/members/{userId:guid}")]
-    public async Task<ActionResult<ApiResponse<bool>>> RemoveProjectMember(Guid id, Guid userId)
-    {
-        if (!_currentUserService.IsAdmin && !_currentUserService.IsSystemAdmin && !_currentUserService.Permissions.Contains(Permissions.ProjectsUpdate))
-        {
-            return Forbid();
-        }
-
-        var member = await _context.ProjectMembers.FirstOrDefaultAsync(pm => pm.ProjectId == id && pm.UserId == userId);
-        if (member == null) return NotFound(ApiResponse<bool>.Fail("Project member not found."));
-
-        _context.ProjectMembers.Remove(member);
-        await _context.SaveChangesAsync();
-        await _auditService.LogAsync("RemoveProjectMember", "ProjectMember", member.Id.ToString());
-
-        return Ok(ApiResponse<bool>.Ok(true, "Member removed from project."));
-    }
-
     private async Task AddProjectMembersAsync(Project project, List<Guid> memberUserIds)
     {
         var validUsers = await _context.Users
@@ -518,7 +425,12 @@ public class ProjectsController : ControllerBase
                 ProjectId = project.Id,
                 UserId = memberId,
                 Role = "Engineer",
-                JoinedAt = DateTime.UtcNow
+                ProjectRole = "SiteEngineer",
+                JoinedAt = DateTime.UtcNow,
+                AssignedAt = DateTime.UtcNow,
+                AssignedBy = _currentUserService.UserId,
+                IsPrimary = false,
+                IsActive = true
             });
         }
 
@@ -584,6 +496,397 @@ public class ProjectsController : ControllerBase
         {
             await _context.SaveChangesAsync();
         }
+    }
+
+    // ==========================================
+    // Project Membership Endpoints (ORG-03)
+    // ==========================================
+
+    [HttpGet("{id:guid}/members")]
+    public async Task<ActionResult<ApiResponse<List<ProjectMemberDto>>>> GetProjectMembers(Guid id, [FromQuery] bool includeHistorical = false)
+    {
+        var project = await _context.Projects.FindAsync(id);
+        if (project == null) return NotFound(ApiResponse<List<ProjectMemberDto>>.ErrorResult("المشروع غير موجود"));
+
+        var query = _context.ProjectMembers
+            .Include(m => m.Project)
+            .Include(m => m.User)
+            .Where(m => m.ProjectId == id)
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!includeHistorical)
+        {
+            query = query.Where(m => m.IsActive && m.RemovedAt == null);
+        }
+
+        var assignerIds = await query.Where(m => m.AssignedBy.HasValue).Select(m => m.AssignedBy!.Value).Distinct().ToListAsync();
+        var assigners = await _context.Users.Where(u => assignerIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        var members = await query
+            .OrderByDescending(m => m.IsPrimary)
+            .ThenBy(m => m.ProjectRole)
+            .Select(m => new ProjectMemberDto(
+                m.Id,
+                m.ProjectId,
+                m.Project.Name,
+                m.UserId,
+                m.User.FullName,
+                m.User.Email,
+                !string.IsNullOrWhiteSpace(m.ProjectRole) ? m.ProjectRole : m.Role,
+                m.IsPrimary,
+                m.AssignedAt,
+                m.AssignedBy,
+                m.AssignedBy.HasValue && assigners.ContainsKey(m.AssignedBy.Value) ? assigners[m.AssignedBy.Value] : null,
+                m.RemovedAt,
+                m.IsActive && m.RemovedAt == null
+            ))
+            .ToListAsync();
+
+        return Ok(ApiResponse<List<ProjectMemberDto>>.SuccessResult(members));
+    }
+
+    [HttpPost("{id:guid}/members")]
+    public async Task<ActionResult<ApiResponse<ProjectMemberDto>>> AddProjectMember(Guid id, [FromBody] AddProjectMemberRequest request)
+    {
+        if (!CanManageProjects(Permissions.ProjectsUpdate))
+        {
+            return Forbid();
+        }
+
+        var project = await _context.Projects.FindAsync(id);
+        if (project == null) return NotFound(ApiResponse<ProjectMemberDto>.ErrorResult("المشروع غير موجود"));
+
+        var user = await _context.Users.FindAsync(request.UserId);
+        if (user == null) return BadRequest(ApiResponse<ProjectMemberDto>.ErrorResult("المستخدم غير موجود"));
+
+        var existing = await _context.ProjectMembers
+            .FirstOrDefaultAsync(m => m.ProjectId == id && m.UserId == request.UserId);
+
+        if (existing != null)
+        {
+            if (existing.IsActive && existing.RemovedAt == null)
+            {
+                return BadRequest(ApiResponse<ProjectMemberDto>.ErrorResult("المستخدم مسجل بالفعل كعضو في هذا المشروع"));
+            }
+
+            existing.IsActive = true;
+            existing.RemovedAt = null;
+            existing.ProjectRole = request.ProjectRole;
+            existing.Role = request.ProjectRole;
+            existing.IsPrimary = request.IsPrimary;
+            existing.AssignedAt = DateTime.UtcNow;
+            existing.AssignedBy = _currentUserService.UserId;
+            await _context.SaveChangesAsync();
+
+            return Ok(ApiResponse<ProjectMemberDto>.SuccessResult(new ProjectMemberDto(
+                existing.Id,
+                project.Id,
+                project.Name,
+                user.Id,
+                user.FullName,
+                user.Email,
+                existing.ProjectRole,
+                existing.IsPrimary,
+                existing.AssignedAt,
+                existing.AssignedBy,
+                null,
+                existing.RemovedAt,
+                existing.IsActive
+            ), "تم إعادة تعيين المستخدم في المشروع بنجاح"));
+        }
+
+        var member = new ProjectMember
+        {
+            ProjectId = id,
+            UserId = request.UserId,
+            ProjectRole = request.ProjectRole,
+            Role = request.ProjectRole,
+            IsPrimary = request.IsPrimary,
+            AssignedAt = DateTime.UtcNow,
+            AssignedBy = _currentUserService.UserId,
+            IsActive = true
+        };
+
+        _context.ProjectMembers.Add(member);
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogAsync("AddProjectMember", "ProjectMember", member.Id.ToString(), null, new
+        {
+            member.ProjectId,
+            member.UserId,
+            member.ProjectRole,
+            member.IsPrimary
+        });
+
+        await _notificationService.NotifyProjectAssignedAsync(project.Id, project.Name, user.Id);
+
+        return Ok(ApiResponse<ProjectMemberDto>.SuccessResult(new ProjectMemberDto(
+            member.Id,
+            project.Id,
+            project.Name,
+            user.Id,
+            user.FullName,
+            user.Email,
+            member.ProjectRole,
+            member.IsPrimary,
+            member.AssignedAt,
+            member.AssignedBy,
+            null,
+            null,
+            member.IsActive
+        ), "تم إضافة العضو إلى المشروع بنجاح"));
+    }
+
+    [HttpPut("{id:guid}/members/{memberId:guid}")]
+    public async Task<ActionResult<ApiResponse<ProjectMemberDto>>> UpdateProjectMember(Guid id, Guid memberId, [FromBody] UpdateProjectMemberRequest request)
+    {
+        if (!CanManageProjects(Permissions.ProjectsUpdate))
+        {
+            return Forbid();
+        }
+
+        var member = await _context.ProjectMembers
+            .Include(m => m.Project)
+            .Include(m => m.User)
+            .FirstOrDefaultAsync(m => m.Id == memberId && m.ProjectId == id);
+
+        if (member == null) return NotFound(ApiResponse<ProjectMemberDto>.ErrorResult("عضوية المشروع غير موجودة"));
+
+        member.ProjectRole = request.ProjectRole;
+        member.Role = request.ProjectRole;
+        member.IsPrimary = request.IsPrimary;
+        member.IsActive = request.IsActive;
+        if (!request.IsActive && member.RemovedAt == null)
+        {
+            member.RemovedAt = DateTime.UtcNow;
+        }
+        else if (request.IsActive)
+        {
+            member.RemovedAt = null;
+        }
+
+        await _context.SaveChangesAsync();
+
+        return Ok(ApiResponse<ProjectMemberDto>.SuccessResult(new ProjectMemberDto(
+            member.Id,
+            member.ProjectId,
+            member.Project.Name,
+            member.UserId,
+            member.User.FullName,
+            member.User.Email,
+            member.ProjectRole,
+            member.IsPrimary,
+            member.AssignedAt,
+            member.AssignedBy,
+            null,
+            member.RemovedAt,
+            member.IsActive && member.RemovedAt == null
+        ), "تم تحديث دور العضو في المشروع بنجاح"));
+    }
+
+    [HttpDelete("{id:guid}/members/{memberId:guid}")]
+    public async Task<ActionResult<ApiResponse<bool>>> RemoveProjectMember(Guid id, Guid memberId)
+    {
+        if (!CanManageProjects(Permissions.ProjectsUpdate))
+        {
+            return Forbid();
+        }
+
+        var member = await _context.ProjectMembers.FirstOrDefaultAsync(m => m.Id == memberId && m.ProjectId == id);
+        if (member == null) return NotFound(ApiResponse<bool>.ErrorResult("عضوية المشروع غير موجودة"));
+
+        member.IsActive = false;
+        member.RemovedAt = DateTime.UtcNow;
+        member.IsPrimary = false;
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogAsync("RemoveProjectMember", "ProjectMember", member.Id.ToString(), null, new
+        {
+            member.ProjectId,
+            member.UserId,
+            member.RemovedAt
+        });
+
+        return Ok(ApiResponse<bool>.SuccessResult(true, "تم إزالة العضو من المشروع بنجاح وحفظ السجل"));
+    }
+
+    // ==========================================
+    // Project Team Assignment Endpoints (ORG-04)
+    // ==========================================
+
+    [HttpGet("{id:guid}/teams")]
+    public async Task<ActionResult<ApiResponse<List<ProjectTeamDto>>>> GetProjectTeams(Guid id, [FromQuery] bool includeHistorical = false)
+    {
+        var project = await _context.Projects.FindAsync(id);
+        if (project == null) return NotFound(ApiResponse<List<ProjectTeamDto>>.ErrorResult("المشروع غير موجود"));
+
+        var query = _context.ProjectTeams
+            .Include(pt => pt.Project)
+            .Include(pt => pt.Team)
+                .ThenInclude(t => t.ManagerUser)
+            .Include(pt => pt.Team)
+                .ThenInclude(t => t.Members)
+            .Where(pt => pt.ProjectId == id)
+            .AsNoTracking()
+            .AsQueryable();
+
+        if (!includeHistorical)
+        {
+            query = query.Where(pt => pt.IsActive && pt.RemovedAt == null);
+        }
+
+        var assignerIds = await query.Where(pt => pt.AssignedBy.HasValue).Select(pt => pt.AssignedBy!.Value).Distinct().ToListAsync();
+        var assigners = await _context.Users.Where(u => assignerIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        var teams = await query
+            .OrderBy(pt => pt.TeamRole)
+            .Select(pt => new ProjectTeamDto(
+                pt.Id,
+                pt.ProjectId,
+                pt.Project.Name,
+                pt.TeamId,
+                pt.Team.Name,
+                pt.Team.Code,
+                pt.Team.ManagerUser != null ? pt.Team.ManagerUser.FullName : null,
+                pt.TeamRole,
+                pt.Team.Members.Count(m => m.IsActive),
+                pt.AssignedAt,
+                pt.AssignedBy,
+                pt.AssignedBy.HasValue && assigners.ContainsKey(pt.AssignedBy.Value) ? assigners[pt.AssignedBy.Value] : null,
+                pt.RemovedAt,
+                pt.IsActive && pt.RemovedAt == null
+            ))
+            .ToListAsync();
+
+        return Ok(ApiResponse<List<ProjectTeamDto>>.SuccessResult(teams));
+    }
+
+    [HttpPost("{id:guid}/teams")]
+    public async Task<ActionResult<ApiResponse<ProjectTeamDto>>> AssignProjectTeam(Guid id, [FromBody] AssignProjectTeamRequest request)
+    {
+        if (!CanManageProjects(Permissions.ProjectsUpdate))
+        {
+            return Forbid();
+        }
+
+        var project = await _context.Projects.FindAsync(id);
+        if (project == null) return NotFound(ApiResponse<ProjectTeamDto>.ErrorResult("المشروع غير موجود"));
+
+        var team = await _context.Teams
+            .Include(t => t.ManagerUser)
+            .Include(t => t.Members)
+            .FirstOrDefaultAsync(t => t.Id == request.TeamId);
+
+        if (team == null) return BadRequest(ApiResponse<ProjectTeamDto>.ErrorResult("فريق العمل غير موجود"));
+
+        var existing = await _context.ProjectTeams
+            .FirstOrDefaultAsync(pt => pt.ProjectId == id && pt.TeamId == request.TeamId);
+
+        if (existing != null)
+        {
+            if (existing.IsActive && existing.RemovedAt == null)
+            {
+                return BadRequest(ApiResponse<ProjectTeamDto>.ErrorResult("فريق العمل مسند بالفعل لهذا المشروع"));
+            }
+
+            existing.IsActive = true;
+            existing.RemovedAt = null;
+            existing.TeamRole = request.TeamRole;
+            existing.AssignedAt = DateTime.UtcNow;
+            existing.AssignedBy = _currentUserService.UserId;
+            await _context.SaveChangesAsync();
+
+            return Ok(ApiResponse<ProjectTeamDto>.SuccessResult(new ProjectTeamDto(
+                existing.Id,
+                project.Id,
+                project.Name,
+                team.Id,
+                team.Name,
+                team.Code,
+                team.ManagerUser?.FullName,
+                existing.TeamRole,
+                team.Members.Count(m => m.IsActive),
+                existing.AssignedAt,
+                existing.AssignedBy,
+                null,
+                existing.RemovedAt,
+                existing.IsActive
+            ), "تم إعادة إسناد فريق العمل إلى المشروع بنجاح"));
+        }
+
+        var projectTeam = new ProjectTeam
+        {
+            ProjectId = id,
+            TeamId = request.TeamId,
+            TeamRole = request.TeamRole,
+            AssignedAt = DateTime.UtcNow,
+            AssignedBy = _currentUserService.UserId,
+            IsActive = true
+        };
+
+        _context.ProjectTeams.Add(projectTeam);
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogAsync("AssignProjectTeam", "ProjectTeam", projectTeam.Id.ToString(), null, new
+        {
+            projectTeam.ProjectId,
+            projectTeam.TeamId,
+            projectTeam.TeamRole
+        });
+
+        // Notify active team members about the project assignment
+        var teamMembers = await _context.TeamMembers
+            .Where(tm => tm.TeamId == request.TeamId && tm.IsActive)
+            .Select(tm => tm.UserId)
+            .ToListAsync();
+
+        foreach (var memberId in teamMembers)
+        {
+            await _notificationService.NotifyProjectAssignedAsync(project.Id, project.Name, memberId);
+        }
+
+        return Ok(ApiResponse<ProjectTeamDto>.SuccessResult(new ProjectTeamDto(
+            projectTeam.Id,
+            project.Id,
+            project.Name,
+            team.Id,
+            team.Name,
+            team.Code,
+            team.ManagerUser?.FullName,
+            projectTeam.TeamRole,
+            team.Members.Count(m => m.IsActive),
+            projectTeam.AssignedAt,
+            projectTeam.AssignedBy,
+            null,
+            null,
+            projectTeam.IsActive
+        ), "تم إسناد فريق العمل للمشروع بنجاح"));
+    }
+
+    [HttpDelete("{id:guid}/teams/{projectTeamId:guid}")]
+    public async Task<ActionResult<ApiResponse<bool>>> RemoveProjectTeam(Guid id, Guid projectTeamId)
+    {
+        if (!CanManageProjects(Permissions.ProjectsUpdate))
+        {
+            return Forbid();
+        }
+
+        var pt = await _context.ProjectTeams.FirstOrDefaultAsync(x => x.Id == projectTeamId && x.ProjectId == id);
+        if (pt == null) return NotFound(ApiResponse<bool>.ErrorResult("إسناد الفريق للمشروع غير موجود"));
+
+        pt.IsActive = false;
+        pt.RemovedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogAsync("RemoveProjectTeam", "ProjectTeam", pt.Id.ToString(), null, new
+        {
+            pt.ProjectId,
+            pt.TeamId,
+            pt.RemovedAt
+        });
+
+        return Ok(ApiResponse<bool>.SuccessResult(true, "تم إزالة فريق العمل من المشروع بنجاح"));
     }
 
     /// <summary>

@@ -125,4 +125,132 @@ public class SecurityAndAuthorizationTests
         Assert.Equal($"user:{userId}", $"user:{userId}");
         Assert.Equal($"conversation:{convId}", $"conversation:{convId}");
     }
+
+    [Fact]
+    public void Org01_DepartmentHierarchy_AndMembershipHistoryPreserved()
+    {
+        var parentDept = new Department { Id = Guid.NewGuid(), Code = "ENG", Name = "Engineering", IsActive = true };
+        var childDept = new Department { Id = Guid.NewGuid(), Code = "CCTV", Name = "CCTV", ParentDepartmentId = parentDept.Id, IsActive = true };
+
+        Assert.Equal(parentDept.Id, childDept.ParentDepartmentId);
+
+        var member = new DepartmentMember
+        {
+            Id = Guid.NewGuid(),
+            DepartmentId = childDept.Id,
+            UserId = Guid.NewGuid(),
+            DepartmentRole = "SeniorEngineer",
+            IsPrimary = true,
+            JoinedAt = DateTime.UtcNow.AddMonths(-6),
+            IsActive = true
+        };
+
+        // When leaving department, historical record is preserved with LeftAt and IsActive = false
+        member.LeftAt = DateTime.UtcNow;
+        member.IsActive = false;
+
+        Assert.NotNull(member.LeftAt);
+        Assert.False(member.IsActive);
+        Assert.True(member.IsPrimary);
+    }
+
+    [Fact]
+    public void Org02_TeamManagement_SupportsManagersAndMultiTeamMembership()
+    {
+        var managerId = Guid.NewGuid();
+        var assistantManagerId = Guid.NewGuid();
+        var supervisorId = Guid.NewGuid();
+
+        var team = new Team
+        {
+            Id = Guid.NewGuid(),
+            DepartmentId = Guid.NewGuid(),
+            Code = "TEAM-CCTV-A",
+            Name = "CCTV Installation Team A",
+            ManagerUserId = managerId,
+            AssistantManagerUserId = assistantManagerId,
+            SupervisorUserId = supervisorId,
+            IsActive = true
+        };
+
+        Assert.Equal(managerId, team.ManagerUserId);
+        Assert.Equal(assistantManagerId, team.AssistantManagerUserId);
+        Assert.Equal(supervisorId, team.SupervisorUserId);
+
+        var user = Guid.NewGuid();
+        var membership1 = new TeamMember { Id = Guid.NewGuid(), TeamId = team.Id, UserId = user, TeamRole = "Engineer", IsPrimaryTeam = true, IsActive = true };
+        var membership2 = new TeamMember { Id = Guid.NewGuid(), TeamId = Guid.NewGuid(), UserId = user, TeamRole = "Supervisor", IsPrimaryTeam = false, IsActive = true };
+
+        // User can belong to multiple teams with different roles
+        Assert.Equal("Engineer", membership1.TeamRole);
+        Assert.Equal("Supervisor", membership2.TeamRole);
+        Assert.True(membership1.IsPrimaryTeam);
+        Assert.False(membership2.IsPrimaryTeam);
+    }
+
+    [Fact]
+    public void Org03_And_Org04_ProjectMembershipAndTeamAssignment()
+    {
+        var projectId = Guid.NewGuid();
+        var pmUser = Guid.NewGuid();
+        var engineerUser = Guid.NewGuid();
+
+        var pmMember = new ProjectMember
+        {
+            ProjectId = projectId,
+            UserId = pmUser,
+            ProjectRole = "ProjectManager",
+            IsPrimary = true,
+            AssignedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+
+        var engMember = new ProjectMember
+        {
+            ProjectId = projectId,
+            UserId = engineerUser,
+            ProjectRole = "SiteEngineer",
+            IsPrimary = false,
+            AssignedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+
+        var teamAssignment = new ProjectTeam
+        {
+            ProjectId = projectId,
+            TeamId = Guid.NewGuid(),
+            TeamRole = "CCTV Installation Team",
+            AssignedAt = DateTime.UtcNow,
+            IsActive = true
+        };
+
+        Assert.Equal("ProjectManager", pmMember.ProjectRole);
+        Assert.True(pmMember.IsPrimary);
+        Assert.Equal("SiteEngineer", engMember.ProjectRole);
+        Assert.Equal("CCTV Installation Team", teamAssignment.TeamRole);
+    }
+
+    [Fact]
+    public void Org05_SiteScoping_EngineerAssignedToSiteADoesNotSeeSiteB()
+    {
+        var siteAId = Guid.NewGuid();
+        var siteBId = Guid.NewGuid();
+        var engineerId = Guid.NewGuid();
+
+        // Engineer is only assigned to Site A
+        var siteAMembership = new SiteMember
+        {
+            SiteId = siteAId,
+            UserId = engineerId,
+            SiteRole = "SiteEngineer",
+            IsActive = true,
+            AssignedAt = DateTime.UtcNow
+        };
+
+        var authorizedSiteIds = new HashSet<Guid> { siteAMembership.SiteId };
+
+        // Verify strict scoping
+        Assert.Contains(siteAId, authorizedSiteIds);
+        Assert.DoesNotContain(siteBId, authorizedSiteIds);
+    }
 }

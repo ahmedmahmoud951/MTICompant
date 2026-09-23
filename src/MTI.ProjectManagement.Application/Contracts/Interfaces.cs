@@ -18,7 +18,10 @@ public interface IAppDbContext
     DbSet<Project> Projects { get; }
     DbSet<Site> Sites { get; }
     DbSet<SiteAssignment> SiteAssignments { get; }
+    DbSet<SiteMember> SiteMembers { get; }
+    DbSet<SiteTeam> SiteTeams { get; }
     DbSet<ProjectMember> ProjectMembers { get; }
+    DbSet<ProjectTeam> ProjectTeams { get; }
     DbSet<EngineerProfile> EngineerProfiles { get; }
 
     DbSet<ProjectDataRecord> ProjectDataRecords { get; }
@@ -70,6 +73,7 @@ public interface IAppDbContext
 
     // Organization & Teams
     DbSet<Department> Departments { get; }
+    DbSet<DepartmentMember> DepartmentMembers { get; }
     DbSet<Team> Teams { get; }
     DbSet<TeamMember> TeamMembers { get; }
 

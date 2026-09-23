@@ -61,20 +61,6 @@ public record UpdateProjectRequest(
     string? CoverImageUrl = null
 );
 
-public record ProjectMemberDto(
-    Guid Id,
-    Guid ProjectId,
-    Guid UserId,
-    string UserName,
-    string UserEmail,
-    string Role,
-    DateTime JoinedAt
-);
-
-public record AssignProjectMemberRequest(
-    Guid UserId,
-    string Role = "Engineer"
-);
 
 public record SiteDto(
     Guid Id,

@@ -680,35 +680,55 @@ export interface ProjectAssignmentDto {
 export interface DepartmentDto {
   id: string;
   code: string;
-  nameAr: string;
-  nameEn: string;
-  description?: string;
+  name: string;
+  nameAr?: string;
+  nameEn?: string;
+  description?: string | null;
+  managerUserId?: string | null;
+  managerUserName?: string | null;
+  parentDepartmentId?: string | null;
+  parentDepartmentName?: string | null;
   isActive: boolean;
+  subDepartmentsCount?: number;
   teamsCount: number;
+  membersCount?: number;
+  createdAt?: string;
 }
 
 export interface TeamDto {
   id: string;
   departmentId: string;
-  departmentNameAr: string;
-  departmentNameEn: string;
+  departmentName?: string;
+  departmentNameAr?: string;
+  departmentNameEn?: string;
   code: string;
   name: string;
-  description?: string;
+  description?: string | null;
+  managerUserId?: string | null;
+  managerUserName?: string | null;
+  assistantManagerUserId?: string | null;
+  assistantManagerUserName?: string | null;
+  supervisorUserId?: string | null;
+  supervisorUserName?: string | null;
   leaderUserId?: string;
   leaderName?: string;
   isActive: boolean;
   membersCount: number;
+  createdAt?: string;
 }
 
 export interface TeamMemberDto {
   id: string;
   teamId: string;
+  teamName?: string;
   userId: string;
   userName: string;
   userEmail: string;
-  roleInTeam: string;
+  teamRole?: string;
+  roleInTeam?: string;
+  isPrimaryTeam?: boolean;
   joinedAt: string;
+  leftAt?: string | null;
   isActive: boolean;
 }
 
@@ -1002,3 +1022,159 @@ export interface AdminUser {
   createdAt: string;
   roles: string[];
 }
+
+// ──────────────────────────────────────────────────────────────
+// ORG-01 to ORG-05: MTI Organization Management Types
+// ──────────────────────────────────────────────────────────────
+
+export interface Department {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  managerUserId?: string | null;
+  managerUserName?: string | null;
+  parentDepartmentId?: string | null;
+  parentDepartmentName?: string | null;
+  isActive: boolean;
+  subDepartmentsCount: number;
+  teamsCount: number;
+  membersCount: number;
+  createdAt: string;
+}
+
+export interface DepartmentMember {
+  id: string;
+  departmentId: string;
+  departmentName: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  departmentRole: string;
+  isPrimary: boolean;
+  joinedAt: string;
+  leftAt?: string | null;
+  isActive: boolean;
+}
+
+export interface DepartmentTreeNode {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  managerUserId?: string | null;
+  managerUserName?: string | null;
+  parentDepartmentId?: string | null;
+  isActive: boolean;
+  teamsCount: number;
+  membersCount: number;
+  children: DepartmentTreeNode[];
+}
+
+export interface Team {
+  id: string;
+  departmentId: string;
+  departmentName: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  managerUserId?: string | null;
+  managerUserName?: string | null;
+  assistantManagerUserId?: string | null;
+  assistantManagerUserName?: string | null;
+  supervisorUserId?: string | null;
+  supervisorUserName?: string | null;
+  isActive: boolean;
+  membersCount: number;
+  createdAt: string;
+}
+
+export interface TeamMember {
+  id: string;
+  teamId: string;
+  teamName: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  teamRole: string;
+  isPrimaryTeam: boolean;
+  joinedAt: string;
+  leftAt?: string | null;
+  isActive: boolean;
+}
+
+export interface ProjectMember {
+  id: string;
+  projectId: string;
+  projectName: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  projectRole: string;
+  isPrimary: boolean;
+  assignedAt: string;
+  assignedBy?: string | null;
+  assignedByName?: string | null;
+  removedAt?: string | null;
+  isActive: boolean;
+}
+
+export interface ProjectTeam {
+  id: string;
+  projectId: string;
+  projectName: string;
+  teamId: string;
+  teamName: string;
+  teamCode: string;
+  teamManagerName?: string | null;
+  teamRole: string;
+  teamMembersCount: number;
+  assignedAt: string;
+  assignedBy?: string | null;
+  assignedByName?: string | null;
+  removedAt?: string | null;
+  isActive: boolean;
+}
+
+export interface SiteMember {
+  id: string;
+  siteId: string;
+  siteName: string;
+  projectId: string;
+  projectName: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  siteRole: string;
+  isPrimary: boolean;
+  assignedAt: string;
+  assignedBy?: string | null;
+  assignedByName?: string | null;
+  removedAt?: string | null;
+  isActive: boolean;
+}
+
+export interface SiteTeam {
+  id: string;
+  siteId: string;
+  siteName: string;
+  teamId: string;
+  teamName: string;
+  teamCode: string;
+  teamManagerName?: string | null;
+  teamRole: string;
+  teamMembersCount: number;
+  assignedAt: string;
+  assignedBy?: string | null;
+  assignedByName?: string | null;
+  removedAt?: string | null;
+  isActive: boolean;
+}
+
+export interface OrganizationRoles {
+  departmentRoles: string[];
+  teamRoles: string[];
+  projectRoles: string[];
+  siteRoles: string[];
+}
+

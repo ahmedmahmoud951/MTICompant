@@ -30,7 +30,10 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<SiteAssignment> SiteAssignments => Set<SiteAssignment>();
+    public DbSet<SiteMember> SiteMembers => Set<SiteMember>();
+    public DbSet<SiteTeam> SiteTeams => Set<SiteTeam>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<ProjectTeam> ProjectTeams => Set<ProjectTeam>();
     public DbSet<EngineerProfile> EngineerProfiles => Set<EngineerProfile>();
 
     // Project Data
@@ -86,6 +89,7 @@ public class AppDbContext : DbContext, IAppDbContext
 
     // Organization & Teams
     public DbSet<Department> Departments => Set<Department>();
+    public DbSet<DepartmentMember> DepartmentMembers => Set<DepartmentMember>();
     public DbSet<Team> Teams => Set<Team>();
     public DbSet<TeamMember> TeamMembers => Set<TeamMember>();
 
@@ -256,10 +260,45 @@ public class AppDbContext : DbContext, IAppDbContext
         {
             entity.ToTable("ProjectMembers");
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => new { e.ProjectId, e.UserId }).IsUnique();
-            entity.Property(e => e.Role).HasMaxLength(50);
+            entity.HasIndex(e => e.ProjectId);
+            entity.HasIndex(e => e.UserId);
+            entity.Property(e => e.ProjectRole).HasMaxLength(100);
+            entity.Property(e => e.Role).HasMaxLength(100);
             entity.HasOne(e => e.Project).WithMany(p => p.Members).HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.User).WithMany(u => u.ProjectMembers).HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProjectTeam>(entity =>
+        {
+            entity.ToTable("ProjectTeams");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.ProjectId);
+            entity.HasIndex(e => e.TeamId);
+            entity.Property(e => e.TeamRole).HasMaxLength(100);
+            entity.HasOne(e => e.Project).WithMany(p => p.Teams).HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Team).WithMany(t => t.ProjectTeams).HasForeignKey(e => e.TeamId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SiteMember>(entity =>
+        {
+            entity.ToTable("SiteMembers");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.SiteId);
+            entity.HasIndex(e => e.UserId);
+            entity.Property(e => e.SiteRole).HasMaxLength(100);
+            entity.HasOne(e => e.Site).WithMany(s => s.Members).HasForeignKey(e => e.SiteId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SiteTeam>(entity =>
+        {
+            entity.ToTable("SiteTeams");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.SiteId);
+            entity.HasIndex(e => e.TeamId);
+            entity.Property(e => e.TeamRole).HasMaxLength(100);
+            entity.HasOne(e => e.Site).WithMany(s => s.Teams).HasForeignKey(e => e.SiteId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Team).WithMany(t => t.SiteTeams).HasForeignKey(e => e.TeamId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<EngineerProfile>(entity =>
@@ -717,7 +756,20 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.Property(e => e.NameAr).HasMaxLength(150).IsRequired();
             entity.Property(e => e.NameEn).HasMaxLength(150).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
+            entity.HasOne(e => e.ParentDepartment).WithMany(p => p.SubDepartments).HasForeignKey(e => e.ParentDepartmentId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ManagerUser).WithMany().HasForeignKey(e => e.ManagerUserId).OnDelete(DeleteBehavior.SetNull);
             entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<DepartmentMember>(entity =>
+        {
+            entity.ToTable("DepartmentMembers");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.DepartmentId);
+            entity.HasIndex(e => e.UserId);
+            entity.Property(e => e.DepartmentRole).HasMaxLength(100).IsRequired();
+            entity.HasOne(e => e.Department).WithMany(d => d.Members).HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Team>(entity =>
@@ -730,7 +782,9 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.Property(e => e.Name).HasMaxLength(150).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.HasOne(e => e.Department).WithMany(d => d.Teams).HasForeignKey(e => e.DepartmentId).OnDelete(DeleteBehavior.Restrict);
-            entity.HasOne(e => e.LeaderUser).WithMany().HasForeignKey(e => e.LeaderUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.ManagerUser).WithMany().HasForeignKey(e => e.ManagerUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.AssistantManagerUser).WithMany().HasForeignKey(e => e.AssistantManagerUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.SupervisorUser).WithMany().HasForeignKey(e => e.SupervisorUserId).OnDelete(DeleteBehavior.SetNull);
             entity.HasQueryFilter(e => !e.IsDeleted);
         });
 
@@ -738,8 +792,10 @@ public class AppDbContext : DbContext, IAppDbContext
         {
             entity.ToTable("TeamMembers");
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => new { e.TeamId, e.UserId }).IsUnique();
-            entity.Property(e => e.RoleInTeam).HasMaxLength(50);
+            entity.HasIndex(e => e.TeamId);
+            entity.HasIndex(e => e.UserId);
+            entity.Property(e => e.TeamRole).HasMaxLength(100);
+            entity.Property(e => e.RoleInTeam).HasMaxLength(100);
             entity.HasOne(e => e.Team).WithMany(t => t.Members).HasForeignKey(e => e.TeamId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Restrict);
         });

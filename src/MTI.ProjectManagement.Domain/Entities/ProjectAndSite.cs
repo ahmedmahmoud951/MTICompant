@@ -28,6 +28,7 @@ public class Project : FullAuditedEntity
     // Navigation
     public ICollection<Site> Sites { get; set; } = new List<Site>();
     public ICollection<ProjectMember> Members { get; set; } = new List<ProjectMember>();
+    public ICollection<ProjectTeam> Teams { get; set; } = new List<ProjectTeam>();
     public ICollection<ProjectAssignment> Assignments { get; set; } = new List<ProjectAssignment>();
     public ICollection<ProjectMilestone> Milestones { get; set; } = new List<ProjectMilestone>();
     public ICollection<ProjectDataRecord> DataRecords { get; set; } = new List<ProjectDataRecord>();
@@ -52,6 +53,8 @@ public class Site : FullAuditedEntity
 
     // Navigation
     public ICollection<SiteAssignment> Assignments { get; set; } = new List<SiteAssignment>();
+    public ICollection<SiteMember> Members { get; set; } = new List<SiteMember>();
+    public ICollection<SiteTeam> Teams { get; set; } = new List<SiteTeam>();
     public ICollection<ProjectDataRecord> DataRecords { get; set; } = new List<ProjectDataRecord>();
     public ICollection<TaskItem> Tasks { get; set; } = new List<TaskItem>();
     public ICollection<Document> Documents { get; set; } = new List<Document>();
@@ -85,8 +88,83 @@ public class ProjectMember : BaseEntity
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;
 
-    public string Role { get; set; } = "Member"; // "ProjectManager", "Engineer", "Observer"
-    public DateTime JoinedAt { get; set; } = DateTime.UtcNow;
+    /// <summary>
+    /// Project Role: ProjectManager, ProjectCoordinator, SiteManager, SiteEngineer, SoftwareEngineer,
+    /// NetworkEngineer, AccessControlEngineer, CCTVEngineer, TechnicalOffice, Accountant, Procurement, Viewer
+    /// </summary>
+    public string ProjectRole { get; set; } = "Viewer";
+
+    /// <summary>Backward compatibility alias</summary>
+    public string Role
+    {
+        get => ProjectRole;
+        set => ProjectRole = value;
+    }
+
+    public bool IsPrimary { get; set; } = false;
+
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Backward compatibility alias</summary>
+    public DateTime JoinedAt
+    {
+        get => AssignedAt;
+        set => AssignedAt = value;
+    }
+
+    public Guid? AssignedBy { get; set; }
+    public DateTime? RemovedAt { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public class ProjectTeam : BaseEntity
+{
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid TeamId { get; set; }
+    public Team Team { get; set; } = null!;
+
+    public string TeamRole { get; set; } = "PrimaryTeam";
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+    public Guid? AssignedBy { get; set; }
+    public DateTime? RemovedAt { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public class SiteMember : BaseEntity
+{
+    public Guid SiteId { get; set; }
+    public Site Site { get; set; } = null!;
+
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+
+    /// <summary>
+    /// Site Role: SiteManager, SiteSupervisor, SiteEngineer, Technician, Installer, Programmer, MaintenanceEngineer, Viewer
+    /// </summary>
+    public string SiteRole { get; set; } = "SiteEngineer";
+
+    public bool IsPrimary { get; set; } = false;
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+    public Guid? AssignedBy { get; set; }
+    public DateTime? RemovedAt { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+
+public class SiteTeam : BaseEntity
+{
+    public Guid SiteId { get; set; }
+    public Site Site { get; set; } = null!;
+
+    public Guid TeamId { get; set; }
+    public Team Team { get; set; } = null!;
+
+    public string TeamRole { get; set; } = "ExecutionTeam";
+    public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
+    public Guid? AssignedBy { get; set; }
+    public DateTime? RemovedAt { get; set; }
+    public bool IsActive { get; set; } = true;
 }
 
 public class EngineerProfile : BaseEntity
