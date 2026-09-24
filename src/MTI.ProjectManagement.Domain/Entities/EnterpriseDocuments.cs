@@ -162,6 +162,8 @@ public class Drawing : FullAuditedEntity
     public string Revision { get; set; } = "A";
     public int Version { get; set; } = 1;
     public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
+    public bool IsLocked { get; set; } = false;
+    public Guid? CurrentRevisionId { get; set; }
 
     public Guid UploadedBy { get; set; }
     public User UploaderUser { get; set; } = null!;
@@ -177,7 +179,39 @@ public class Drawing : FullAuditedEntity
     public long FileSizeBytes { get; set; }
 
     // Navigation
+    public ICollection<DrawingRevision> Revisions { get; set; } = new List<DrawingRevision>();
     public ICollection<DrawingMarkup> Markups { get; set; } = new List<DrawingMarkup>();
+}
+
+// ==========================================
+// DRAW-04: MTI Drawing Revision System Entity
+// ==========================================
+public class DrawingRevision : FullAuditedEntity
+{
+    public Guid DrawingId { get; set; }
+    public Drawing Drawing { get; set; } = null!;
+
+    public string Revision { get; set; } = "A"; // e.g. "A", "B", "C"
+    public int VersionNumber { get; set; } = 1;
+    public bool IsCurrent { get; set; } = true;
+
+    public string StorageKey { get; set; } = string.Empty;
+    public string? FileName { get; set; }
+    public string? FileExtension { get; set; }
+    public long FileSizeBytes { get; set; }
+
+    public Guid UploadedBy { get; set; }
+    public User UploaderUser { get; set; } = null!;
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+
+    public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
+    public Guid? ApprovedBy { get; set; }
+    public User? ApproverUser { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
+    public string? ChangeReason { get; set; }
+    public string? Comments { get; set; }
+    public bool IsLocked { get; set; } = false;
 }
 
 // ==========================================
@@ -187,6 +221,9 @@ public class DrawingMarkup : BaseEntity
 {
     public Guid DrawingId { get; set; }
     public Drawing Drawing { get; set; } = null!;
+
+    public Guid? RevisionId { get; set; }
+    public DrawingRevision? Revision { get; set; }
 
     public Guid UserId { get; set; }
     public User User { get; set; } = null!;

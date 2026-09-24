@@ -375,7 +375,8 @@ public class DocumentsController : ControllerBase
             OwnerUserId = userId.Value,
             UploadedBy = userId.Value,
             Status = DocumentStatus.Draft,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            EditableUntil = DateTime.UtcNow.AddHours(24) // DOC-08: 24-hour modification window
         };
 
         _context.Documents.Add(document);
@@ -976,8 +977,23 @@ public class DocumentsController : ControllerBase
         if (!canAccess) return Forbid();
 
         var isAdmin = _currentUserService.IsAdmin || _currentUserService.IsSystemAdmin;
-        if (!isAdmin && document.UploadedBy != userId.Value)
-            return Forbid();
+        if (!isAdmin)
+        {
+            if (document.UploadedBy != userId.Value)
+                return Forbid();
+
+            var isSealed = document.LockedAt.HasValue
+                || document.Status == DocumentStatus.Approved
+                || document.Status == DocumentStatus.Locked
+                || document.IsLocked;
+
+            if (isSealed)
+                return BadRequest(ApiResponse<DocumentDto>.ErrorResult("لا يمكن تعديل مستند معتمد أو مقفل."));
+
+            // DOC-08: Strictly enforce 24-hour window server-side
+            if (document.EditableUntil.HasValue && DateTime.UtcNow > document.EditableUntil.Value)
+                return BadRequest(ApiResponse<DocumentDto>.ErrorResult("انتهت نافذة التعديل المسموح بها (24 ساعة) لهذا المستند. أصبح المستند للقراءة فقط."));
+        }
 
         if (!string.IsNullOrWhiteSpace(request.Title))
             document.Title = request.Title.Trim();
@@ -1032,6 +1048,215 @@ public class DocumentsController : ControllerBase
         );
 
         return Ok(ApiResponse<DocumentDto>.SuccessResult(dto, "تم تحديث بيانات المستند بنجاح"));
+    }
+
+    // ==========================================
+    // DOC-08: Replace Incorrect Upload (within 24h window)
+    // ==========================================
+
+    [HttpPost("{id:guid}/replace-file")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<ApiResponse<DocumentDto>>> ReplaceFile(
+        Guid id,
+        [FromForm] DocumentVersionUploadRequest request)
+    {
+        var userId = _currentUserService.UserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var document = await _context.Documents
+            .Include(d => d.Project)
+            .Include(d => d.Site)
+            .Include(d => d.DocumentType)
+            .Include(d => d.OwnerUser)
+            .Include(d => d.UploaderUser)
+            .Include(d => d.CurrentVersion)
+                .ThenInclude(v => v!.File)
+            .Include(d => d.Versions)
+                .ThenInclude(v => v.File)
+            .FirstOrDefaultAsync(d => d.Id == id);
+
+        if (document == null) return NotFound(ApiResponse<DocumentDto>.ErrorResult("المستند غير موجود"));
+
+        var canAccess = await _resourceAuthorizationService.CanAccessProjectAsync(userId.Value, document.ProjectId);
+        if (!canAccess) return Forbid();
+
+        var isAdmin = _currentUserService.IsAdmin || _currentUserService.IsSystemAdmin;
+        var isSealed = document.LockedAt.HasValue
+            || document.Status == DocumentStatus.Approved
+            || document.Status == DocumentStatus.Locked
+            || document.IsLocked;
+
+        if (!isAdmin)
+        {
+            if (document.UploadedBy != userId.Value)
+                return Forbid();
+
+            if (isSealed)
+                return BadRequest(ApiResponse<DocumentDto>.ErrorResult("لا يمكن استبدال ملف لمستند معتمد أو مقفل."));
+
+            if (document.EditableUntil.HasValue && DateTime.UtcNow > document.EditableUntil.Value)
+                return BadRequest(ApiResponse<DocumentDto>.ErrorResult("انتهت نافذة التعديل المسموح بها (24 ساعة) لهذا المستند. لا يمكن استبدال الملف."));
+        }
+
+        var file = request.File;
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(ApiResponse<DocumentDto>.ErrorResult("الملف المرفوع فارغ"));
+        }
+
+        var targetVersion = document.CurrentVersion ?? document.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault();
+        if (targetVersion == null)
+        {
+            var nextVersionNumber = 1;
+            var newVersionId = Guid.NewGuid();
+            var newObjKey = _mediaStorageService.BuildDocumentObjectKey(document.ProjectId, document.Id, newVersionId, file.FileName);
+            using var str = file.OpenReadStream();
+            var (upKey, csum, fSize) = await _mediaStorageService.UploadStreamAsync(str, newObjKey, file.ContentType);
+
+            var mf = new MediaFile
+            {
+                Id = Guid.NewGuid(),
+                EntityType = "Document",
+                EntityId = document.Id,
+                OwnerUserId = userId.Value,
+                StorageProvider = "BackblazeB2",
+                BucketName = "MTICompany",
+                ObjectKey = upKey,
+                OriginalFileName = Path.GetFileName(file.FileName),
+                StoredFileName = Path.GetFileName(upKey),
+                ContentType = file.ContentType,
+                MediaType = MediaType.Document,
+                FileSize = fSize,
+                Checksum = csum,
+                Status = "Uploaded",
+                UploadedAt = DateTime.UtcNow
+            };
+            _context.MediaFiles.Add(mf);
+
+            targetVersion = new DocumentVersion
+            {
+                Id = newVersionId,
+                DocumentId = document.Id,
+                VersionNumber = nextVersionNumber,
+                FileId = mf.Id,
+                UploadedBy = userId.Value,
+                UploadedAt = DateTime.UtcNow,
+                EditableUntil = document.EditableUntil ?? DateTime.UtcNow.AddHours(24),
+                EditUntil = document.EditableUntil ?? DateTime.UtcNow.AddHours(24),
+                Status = DocumentVersionStatus.PendingReview,
+                ChangeReason = request.ChangeReason ?? "Initial upload replaced",
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.DocumentVersions.Add(targetVersion);
+            document.CurrentVersionId = targetVersion.Id;
+        }
+        else
+        {
+            var oldFile = targetVersion.File;
+            var newObjKey = _mediaStorageService.BuildDocumentObjectKey(document.ProjectId, document.Id, targetVersion.Id, file.FileName);
+
+            using var str = file.OpenReadStream();
+            var (upKey, csum, fSize) = await _mediaStorageService.UploadStreamAsync(str, newObjKey, file.ContentType);
+
+            if (oldFile != null)
+            {
+                if (!string.IsNullOrEmpty(oldFile.ObjectKey) && oldFile.ObjectKey != upKey)
+                {
+                    try { await _mediaStorageService.DeleteFileAsync(oldFile.ObjectKey); } catch { }
+                }
+                oldFile.ObjectKey = upKey;
+                oldFile.OriginalFileName = Path.GetFileName(file.FileName);
+                oldFile.StoredFileName = Path.GetFileName(upKey);
+                oldFile.ContentType = file.ContentType;
+                oldFile.FileSize = fSize;
+                oldFile.Checksum = csum;
+                oldFile.UploadedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                var mf = new MediaFile
+                {
+                    Id = Guid.NewGuid(),
+                    EntityType = "Document",
+                    EntityId = document.Id,
+                    OwnerUserId = userId.Value,
+                    StorageProvider = "BackblazeB2",
+                    BucketName = "MTICompany",
+                    ObjectKey = upKey,
+                    OriginalFileName = Path.GetFileName(file.FileName),
+                    StoredFileName = Path.GetFileName(upKey),
+                    ContentType = file.ContentType,
+                    MediaType = MediaType.Document,
+                    FileSize = fSize,
+                    Checksum = csum,
+                    Status = "Uploaded",
+                    UploadedAt = DateTime.UtcNow
+                };
+                _context.MediaFiles.Add(mf);
+                targetVersion.FileId = mf.Id;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.ChangeReason))
+            {
+                targetVersion.ChangeReason = request.ChangeReason.Trim();
+            }
+            targetVersion.UploadedAt = DateTime.UtcNow;
+        }
+
+        document.FileName = Path.GetFileName(file.FileName);
+        document.FileSize = file.Length;
+        document.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogAsync("ReplaceDocumentFile", "Document", document.Id.ToString(), null, new
+        {
+            DocumentId = document.Id,
+            FileName = file.FileName,
+            ReplacedBy = userId.Value,
+            Reason = request.ChangeReason
+        });
+
+        await _notificationService.BroadcastToProjectAsync(document.ProjectId, "DocumentFileReplaced", new
+        {
+            DocumentId = document.Id,
+            DocumentNumber = document.DocumentNumber,
+            FileName = file.FileName,
+            ReplacedBy = _currentUserService.Email
+        });
+
+        return Ok(ApiResponse<DocumentDto>.SuccessResult(new DocumentDto(
+            document.Id,
+            document.DocumentNumber,
+            document.ProjectId,
+            document.Project.Name,
+            document.SiteId,
+            document.Site?.Name,
+            document.DocumentTypeId,
+            document.DocumentType.Code,
+            document.DocumentType.NameAr,
+            document.DocumentType.NameEn,
+            document.Title,
+            document.Description,
+            document.OwnerUserId,
+            document.OwnerUser.FullName,
+            document.UploadedBy,
+            document.UploaderUser.FullName,
+            document.Status,
+            document.CurrentVersionId,
+            targetVersion.VersionNumber,
+            file.FileName,
+            file.Length,
+            document.EditableUntil,
+            document.IsLocked,
+            true,
+            document.ApprovedAt,
+            document.ApprovedBy,
+            document.ApproverUser?.FullName,
+            document.CreatedAt,
+            document.UpdatedAt,
+            document.Versions.Count,
+            document.Category
+        ), "تم استبدال الملف بنجاح ضمن نافذة التعديل (24 ساعة)"));
     }
 
     // ==========================================
@@ -1315,7 +1540,8 @@ public class DocumentsController : ControllerBase
             OwnerUserId = userId.Value,
             UploadedBy = userId.Value,
             Status = DocumentStatus.Draft,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            EditableUntil = DateTime.UtcNow.AddHours(24) // DOC-08: 24-hour edit window
         };
 
         _context.Documents.Add(document);

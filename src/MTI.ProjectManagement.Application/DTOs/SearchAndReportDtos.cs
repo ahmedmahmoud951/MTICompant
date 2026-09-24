@@ -85,3 +85,20 @@ public record ReportCatalogItemDto(
     string EntityType,
     bool SupportsExport
 );
+
+public record ActivityTimelineItemDto(
+    Guid Id,
+    Guid? UserId,
+    string? UserName,
+    string? UserEmail,
+    string Action,
+    string EntityType,
+    string? EntityId,
+    Guid? ProjectId,
+    string? ProjectName,
+    Guid? SiteId,
+    string? SiteName,
+    string? OldValues,
+    string? NewValues,
+    DateTime CreatedAt
+);

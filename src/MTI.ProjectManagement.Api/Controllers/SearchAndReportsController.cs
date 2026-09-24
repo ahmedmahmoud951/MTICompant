@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MTI.ProjectManagement.Api.Helpers;
+using MTI.ProjectManagement.Application.Common;
 using MTI.ProjectManagement.Application.Contracts;
 using MTI.ProjectManagement.Application.DTOs;
 using MTI.ProjectManagement.Application.Security;
@@ -35,151 +36,379 @@ public class SearchAndReportsController : ControllerBase
 
     [HttpGet("search")]
     public async Task<ActionResult<GlobalSearchResponseDto>> GlobalSearch(
-        [FromQuery] string q,
-        CancellationToken cancellationToken)
+        [FromQuery] string? q = null,
+        [FromQuery] Guid? projectId = null,
+        [FromQuery] Guid? siteId = null,
+        [FromQuery] Guid? departmentId = null,
+        [FromQuery] Guid? teamId = null,
+        [FromQuery] Guid? userId = null,
+        [FromQuery] string? category = null,
+        [FromQuery] string? documentType = null,
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] string? status = null,
+        [FromQuery] string? entityType = null,
+        CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(q))
-            return Ok(new GlobalSearchResponseDto(string.Empty, 0, new List<SearchResultItemDto>()));
-
-        var term = q.Trim().ToLower();
+        var term = q?.Trim().ToLower() ?? string.Empty;
         var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdString, out var userId)) return Unauthorized();
+        if (!Guid.TryParse(userIdString, out var currentUserId)) return Unauthorized();
 
         var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("SuperAdmin");
         var authorizedProjectIds = isAdmin
             ? await _dbContext.Projects.Where(p => !p.IsDeleted).Select(p => p.Id).ToListAsync(cancellationToken)
-            : (await _resourceAuthorization.GetAuthorizedProjectIdsAsync(userId, cancellationToken: cancellationToken)).ToList();
+            : (await _resourceAuthorization.GetAuthorizedProjectIdsAsync(currentUserId, cancellationToken: cancellationToken)).ToList();
         var authorizedSiteIds = isAdmin
             ? await _dbContext.Sites.Where(s => !s.IsDeleted).Select(s => s.Id).ToListAsync(cancellationToken)
-            : (await _resourceAuthorization.GetAuthorizedSiteIdsAsync(userId, cancellationToken: cancellationToken)).ToList();
+            : (await _resourceAuthorization.GetAuthorizedSiteIdsAsync(currentUserId, cancellationToken: cancellationToken)).ToList();
 
         var results = new List<SearchResultItemDto>();
 
         // 1. Projects
-        var projects = await _dbContext.Projects.AsNoTracking()
-            .Where(p => !p.IsDeleted && authorizedProjectIds.Contains(p.Id))
-            .Where(p => p.Name.ToLower().Contains(term) || p.Code.ToLower().Contains(term) || (p.Description != null && p.Description.ToLower().Contains(term)))
-            .Take(10)
-            .Select(p => new SearchResultItemDto("Project", p.Id, p.Name, $"Code: {p.Code} | Client: {p.ClientName}", p.Status.ToString(), p.CreatedAt, $"/projects/{p.Id}"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(projects);
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("Project", StringComparison.OrdinalIgnoreCase))
+        {
+            var pQuery = _dbContext.Projects.AsNoTracking()
+                .Where(p => !p.IsDeleted && authorizedProjectIds.Contains(p.Id));
+
+            if (projectId.HasValue) pQuery = pQuery.Where(p => p.Id == projectId.Value);
+            if (dateFrom.HasValue) pQuery = pQuery.Where(p => p.CreatedAt >= dateFrom.Value);
+            if (dateTo.HasValue) pQuery = pQuery.Where(p => p.CreatedAt <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                pQuery = pQuery.Where(p => p.Name.ToLower().Contains(term) || p.Code.ToLower().Contains(term) || (p.Description != null && p.Description.ToLower().Contains(term)));
+
+            var projects = await pQuery.Take(10)
+                .Select(p => new SearchResultItemDto("Project", p.Id, p.Name, $"Code: {p.Code} | Client: {p.ClientName}", p.Status.ToString(), p.CreatedAt, $"/projects/{p.Id}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(projects);
+        }
 
         // 2. Sites
-        var sites = await _dbContext.Sites.AsNoTracking()
-            .Where(s => !s.IsDeleted && authorizedSiteIds.Contains(s.Id))
-            .Where(s => s.Name.ToLower().Contains(term) || s.Code.ToLower().Contains(term) || (s.Description != null && s.Description.ToLower().Contains(term)))
-            .Take(10)
-            .Select(s => new SearchResultItemDto("Site", s.Id, s.Name, $"Code: {s.Code} | Address: {s.Address}", s.Status.ToString(), s.CreatedAt, $"/sites/{s.Id}"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(sites);
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("Site", StringComparison.OrdinalIgnoreCase))
+        {
+            var sQuery = _dbContext.Sites.AsNoTracking()
+                .Where(s => !s.IsDeleted && authorizedSiteIds.Contains(s.Id));
 
-        // 3. Project Data
-        var dataRecords = await _dbContext.ProjectDataRecords.AsNoTracking()
-            .Where(d => !d.IsDeleted && authorizedSiteIds.Contains(d.SiteId))
-            .Where(d => d.Title.ToLower().Contains(term) || (d.Description != null && d.Description.ToLower().Contains(term)))
-            .Take(10)
-            .Select(d => new SearchResultItemDto("ProjectData", d.Id, d.Title, $"Version: {d.Version}", d.Status.ToString(), d.CreatedAt, $"/project-data/{d.Id}"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(dataRecords);
+            if (siteId.HasValue) sQuery = sQuery.Where(s => s.Id == siteId.Value);
+            if (projectId.HasValue) sQuery = sQuery.Where(s => s.ProjectId == projectId.Value);
+            if (dateFrom.HasValue) sQuery = sQuery.Where(s => s.CreatedAt >= dateFrom.Value);
+            if (dateTo.HasValue) sQuery = sQuery.Where(s => s.CreatedAt <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                sQuery = sQuery.Where(s => s.Name.ToLower().Contains(term) || s.Code.ToLower().Contains(term) || (s.Description != null && s.Description.ToLower().Contains(term)));
+
+            var sites = await sQuery.Take(10)
+                .Select(s => new SearchResultItemDto("Site", s.Id, s.Name, $"Code: {s.Code} | Address: {s.Address}", s.Status.ToString(), s.CreatedAt, $"/sites/{s.Id}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(sites);
+        }
+
+        // 3. Teams
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("Team", StringComparison.OrdinalIgnoreCase))
+        {
+            var teamsQuery = _dbContext.Teams.AsNoTracking().Where(t => !t.IsDeleted);
+            if (!isAdmin)
+            {
+                teamsQuery = teamsQuery.Where(t => t.Members.Any(m => m.UserId == currentUserId) || t.ManagerUserId == currentUserId);
+            }
+            if (teamId.HasValue) teamsQuery = teamsQuery.Where(t => t.Id == teamId.Value);
+            if (departmentId.HasValue) teamsQuery = teamsQuery.Where(t => t.DepartmentId == departmentId.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                teamsQuery = teamsQuery.Where(t => t.Name.ToLower().Contains(term) || (t.Description != null && t.Description.ToLower().Contains(term)));
+
+            var teams = await teamsQuery.Take(8)
+                .Select(t => new SearchResultItemDto("Team", t.Id, t.Name, t.Description, t.IsActive ? "Active" : "Inactive", t.CreatedAt, $"/teams/{t.Id}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(teams);
+        }
 
         // 4. Tasks
-        var tasks = await _dbContext.Tasks.AsNoTracking()
-            .Where(t => !t.IsDeleted && (t.AssignedToUserId == userId || (t.SiteId.HasValue && authorizedSiteIds.Contains(t.SiteId.Value)) || authorizedProjectIds.Contains(t.ProjectId)))
-            .Where(t => t.Title.ToLower().Contains(term) || (t.Description != null && t.Description.ToLower().Contains(term)))
-            .Take(10)
-            .Select(t => new SearchResultItemDto("Task", t.Id, t.Title, $"Priority: {t.Priority}", t.Status.ToString(), t.CreatedAt, $"/tasks/{t.Id}"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(tasks);
-
-        // 5. Engineers (Admin only)
-        if (isAdmin)
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("Task", StringComparison.OrdinalIgnoreCase))
         {
-            var users = await _dbContext.Users.AsNoTracking()
-                .Where(u => !u.IsDeleted && (u.FirstName.ToLower().Contains(term) || u.LastName.ToLower().Contains(term) || u.Email.ToLower().Contains(term)))
-                .Take(5)
+            var tasksQuery = _dbContext.Tasks.AsNoTracking()
+                .Where(t => !t.IsDeleted && (t.AssignedToUserId == currentUserId || (t.SiteId.HasValue && authorizedSiteIds.Contains(t.SiteId.Value)) || authorizedProjectIds.Contains(t.ProjectId)));
+
+            if (projectId.HasValue) tasksQuery = tasksQuery.Where(t => t.ProjectId == projectId.Value);
+            if (siteId.HasValue) tasksQuery = tasksQuery.Where(t => t.SiteId == siteId.Value);
+            if (userId.HasValue) tasksQuery = tasksQuery.Where(t => t.AssignedToUserId == userId.Value);
+            if (dateFrom.HasValue) tasksQuery = tasksQuery.Where(t => t.CreatedAt >= dateFrom.Value);
+            if (dateTo.HasValue) tasksQuery = tasksQuery.Where(t => t.CreatedAt <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                tasksQuery = tasksQuery.Where(t => t.Title.ToLower().Contains(term) || (t.Description != null && t.Description.ToLower().Contains(term)));
+
+            var tasks = await tasksQuery.Take(10)
+                .Select(t => new SearchResultItemDto("Task", t.Id, t.Title, $"Priority: {t.Priority}", t.Status.ToString(), t.CreatedAt, $"/tasks/{t.Id}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(tasks);
+        }
+
+        // 5. Users (Scoped authorization)
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("User", StringComparison.OrdinalIgnoreCase))
+        {
+            var usersQuery = _dbContext.Users.AsNoTracking().Where(u => !u.IsDeleted);
+            if (!isAdmin)
+            {
+                // Normal users can only discover users who share a project or team
+                usersQuery = usersQuery.Where(u => u.Id == currentUserId ||
+                    _dbContext.ProjectAssignments.Any(pa => authorizedProjectIds.Contains(pa.ProjectId) && pa.UserId == u.Id) ||
+                    _dbContext.TeamMembers.Any(tm => _dbContext.TeamMembers.Where(myTm => myTm.UserId == currentUserId).Select(myTm => myTm.TeamId).Contains(tm.TeamId) && tm.UserId == u.Id));
+            }
+            if (userId.HasValue) usersQuery = usersQuery.Where(u => u.Id == userId.Value);
+            if (departmentId.HasValue) usersQuery = usersQuery.Where(u => u.UserProfile != null && u.UserProfile.DepartmentId == departmentId.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                usersQuery = usersQuery.Where(u => u.FirstName.ToLower().Contains(term) || u.LastName.ToLower().Contains(term) || u.Email.ToLower().Contains(term));
+
+            var users = await usersQuery.Take(8)
                 .Select(u => new SearchResultItemDto("User", u.Id, $"{u.FirstName} {u.LastName}", u.Email, u.IsActive ? "Active" : "Inactive", u.CreatedAt, $"/users/{u.Id}"))
                 .ToListAsync(cancellationToken);
             results.AddRange(users);
         }
 
-        // 6. Documents (title/number) — SEARCH-01
-        var documents = await _dbContext.Documents.AsNoTracking()
-            .Where(d => !d.IsDeleted && authorizedProjectIds.Contains(d.ProjectId))
-            .Where(d => d.Title.ToLower().Contains(term) || d.DocumentNumber.ToLower().Contains(term))
-            .Take(8)
-            .Select(d => new SearchResultItemDto("Document", d.Id, d.Title, d.DocumentNumber, d.Status.ToString(), d.CreatedAt, $"/documents/{d.Id}"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(documents);
+        // 6. Documents
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("Document", StringComparison.OrdinalIgnoreCase))
+        {
+            var docsQuery = _dbContext.Documents.AsNoTracking()
+                .Where(d => !d.IsDeleted && authorizedProjectIds.Contains(d.ProjectId));
 
-        // 7. BoqItems
-        var boqItems = await _dbContext.BoqItems.AsNoTracking()
-            .Where(b => !b.IsDeleted && authorizedProjectIds.Contains(b.ProjectId))
-            .Where(b => b.ItemCode.ToLower().Contains(term) || b.Description.ToLower().Contains(term))
-            .Take(8)
-            .Select(b => new SearchResultItemDto("BoqItem", b.Id, b.ItemCode, b.Description, b.Category, b.CreatedAt, $"/projects/{b.ProjectId}/boq"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(boqItems);
+            if (projectId.HasValue) docsQuery = docsQuery.Where(d => d.ProjectId == projectId.Value);
+            if (siteId.HasValue) docsQuery = docsQuery.Where(d => d.SiteId == siteId.Value);
+            if (userId.HasValue) docsQuery = docsQuery.Where(d => d.UploadedBy == userId.Value);
+            if (dateFrom.HasValue) docsQuery = docsQuery.Where(d => d.CreatedAt >= dateFrom.Value);
+            if (dateTo.HasValue) docsQuery = docsQuery.Where(d => d.CreatedAt <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(documentType))
+                docsQuery = docsQuery.Where(d => d.DocumentType.Code.ToLower() == documentType.ToLower() || d.DocumentType.NameEn.ToLower() == documentType.ToLower() || d.DocumentType.NameAr.ToLower() == documentType.ToLower());
+            if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<DocumentStatus>(status, true, out var parsedDocStatus))
+                docsQuery = docsQuery.Where(d => d.Status == parsedDocStatus);
+            if (!string.IsNullOrWhiteSpace(category) && Enum.TryParse<DocumentCategory>(category, true, out var parsedCat))
+                docsQuery = docsQuery.Where(d => d.Category == parsedCat);
+            if (!string.IsNullOrWhiteSpace(term))
+                docsQuery = docsQuery.Where(d => d.Title.ToLower().Contains(term) || d.DocumentNumber.ToLower().Contains(term) || (d.Description != null && d.Description.ToLower().Contains(term)));
 
-        // 8. CommercialOffers / TechnicalOffers
-        var commercialOffers = await _dbContext.CommercialOffers.AsNoTracking()
-            .Where(o => !o.IsDeleted && authorizedProjectIds.Contains(o.ProjectId))
-            .Where(o => o.Title.ToLower().Contains(term))
-            .Take(5)
-            .Select(o => new SearchResultItemDto("CommercialOffer", o.Id, o.Title, $"Amount: {o.TotalAmount} {o.Currency}", o.Status.ToString(), o.CreatedAt, $"/projects/{o.ProjectId}/offers"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(commercialOffers);
+            var documents = await docsQuery.Take(10)
+                .Select(d => new SearchResultItemDto("Document", d.Id, d.Title, d.DocumentNumber, d.Status.ToString(), d.CreatedAt, $"/documents/{d.Id}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(documents);
+        }
 
-        var technicalOffers = await _dbContext.TechnicalOffers.AsNoTracking()
-            .Where(o => !o.IsDeleted && authorizedProjectIds.Contains(o.ProjectId))
-            .Where(o => o.Title.ToLower().Contains(term) || o.ScopeOfWork.ToLower().Contains(term))
-            .Take(5)
-            .Select(o => new { o.Id, o.Title, o.ScopeOfWork, o.Status, o.CreatedAt, o.ProjectId })
-            .ToListAsync(cancellationToken);
-        results.AddRange(technicalOffers.Select(o => new SearchResultItemDto(
-            "TechnicalOffer",
-            o.Id,
-            o.Title,
-            o.ScopeOfWork.Length > 80 ? o.ScopeOfWork[..80] : o.ScopeOfWork,
-            o.Status.ToString(),
-            o.CreatedAt,
-            $"/projects/{o.ProjectId}/offers")));
+        // 7. Drawings
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("Drawing", StringComparison.OrdinalIgnoreCase))
+        {
+            var drawingsQuery = _dbContext.Drawings.AsNoTracking()
+                .Where(d => !d.IsDeleted && authorizedProjectIds.Contains(d.ProjectId));
 
-        // 9. Invoices
-        var invoices = await _dbContext.ProjectInvoices.AsNoTracking()
-            .Where(i => !i.IsDeleted && authorizedProjectIds.Contains(i.ProjectId))
-            .Where(i => i.InvoiceNumber.ToLower().Contains(term) || (i.Notes != null && i.Notes.ToLower().Contains(term)))
-            .Take(8)
-            .Select(i => new SearchResultItemDto("Invoice", i.Id, i.InvoiceNumber, i.MilestoneDescription, i.Status.ToString(), i.CreatedAt, $"/accounting/invoices/{i.Id}"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(invoices);
+            if (projectId.HasValue) drawingsQuery = drawingsQuery.Where(d => d.ProjectId == projectId.Value);
+            if (siteId.HasValue) drawingsQuery = drawingsQuery.Where(d => d.SiteId == siteId.Value);
+            if (userId.HasValue) drawingsQuery = drawingsQuery.Where(d => d.UploadedBy == userId.Value);
+            if (dateFrom.HasValue) drawingsQuery = drawingsQuery.Where(d => d.CreatedAt >= dateFrom.Value);
+            if (dateTo.HasValue) drawingsQuery = drawingsQuery.Where(d => d.CreatedAt <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                drawingsQuery = drawingsQuery.Where(d => d.DrawingTitle.ToLower().Contains(term) || d.DrawingNumber.ToLower().Contains(term) || d.Revision.ToLower().Contains(term));
 
-        // 10. CompanyAssets
-        var assets = await _dbContext.CompanyAssets.AsNoTracking()
-            .Where(a => !a.IsDeleted && (!a.ProjectId.HasValue || authorizedProjectIds.Contains(a.ProjectId.Value)))
-            .Where(a => a.Name.ToLower().Contains(term) || a.AssetTag.ToLower().Contains(term) || a.SerialNumber.ToLower().Contains(term))
-            .Take(8)
-            .Select(a => new SearchResultItemDto("CompanyAsset", a.Id, a.Name, a.AssetTag, a.Status.ToString(), a.CreatedAt, $"/assets/{a.Id}"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(assets);
+            var drawings = await drawingsQuery.Take(10)
+                .Select(d => new SearchResultItemDto("Drawing", d.Id, d.DrawingTitle, $"No: {d.DrawingNumber} | Rev: {d.Revision}", d.Status.ToString(), d.CreatedAt, $"/drawings/{d.Id}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(drawings);
+        }
 
-        // 11. Chat messages (only conversations user is member of)
-        var chatMessages = await _dbContext.Messages.AsNoTracking()
-            .Where(m => !m.IsDeleted && m.Conversation.Members.Any(mb => mb.UserId == userId))
-            .Where(m => m.Content.ToLower().Contains(term))
-            .OrderByDescending(m => m.CreatedAt)
-            .Take(8)
-            .Select(m => new SearchResultItemDto(
-                "ChatMessage",
-                m.Id,
-                m.Content.Length > 80 ? m.Content.Substring(0, 80) : m.Content,
-                m.Sender != null ? (m.Sender.FirstName + " " + m.Sender.LastName) : null,
-                "Message",
-                m.CreatedAt,
-                $"/chat/{m.ConversationId}"))
-            .ToListAsync(cancellationToken);
-        results.AddRange(chatMessages);
+        // 8. Daily Reports
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("DailyReport", StringComparison.OrdinalIgnoreCase))
+        {
+            var reportsQuery = _dbContext.DailySiteReports.AsNoTracking()
+                .Where(r => !r.IsDeleted && (authorizedSiteIds.Contains(r.SiteId) || (r.Site != null && authorizedProjectIds.Contains(r.Site.ProjectId))));
 
-        return Ok(new GlobalSearchResponseDto(q, results.Count, results));
+            if (siteId.HasValue) reportsQuery = reportsQuery.Where(r => r.SiteId == siteId.Value);
+            if (userId.HasValue) reportsQuery = reportsQuery.Where(r => r.EngineerUserId == userId.Value);
+            if (dateFrom.HasValue) reportsQuery = reportsQuery.Where(r => r.ReportDate >= dateFrom.Value);
+            if (dateTo.HasValue) reportsQuery = reportsQuery.Where(r => r.ReportDate <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                reportsQuery = reportsQuery.Where(r => (r.WorkCompleted != null && r.WorkCompleted.ToLower().Contains(term)) || (r.WorkInProgress != null && r.WorkInProgress.ToLower().Contains(term)) || (r.Problems != null && r.Problems.ToLower().Contains(term)) || (r.SafetyNotes != null && r.SafetyNotes.ToLower().Contains(term)));
+
+            var reports = await reportsQuery.Take(10)
+                .Select(r => new SearchResultItemDto("DailyReport", r.Id, $"Daily Report - {r.ReportDate:yyyy-MM-dd}", r.WorkCompleted, r.Status.ToString(), r.CreatedAt, $"/daily-reports/{r.Id}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(reports);
+        }
+
+        // 9. Data Sheets
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("DataSheet", StringComparison.OrdinalIgnoreCase))
+        {
+            var dataSheetsQuery = _dbContext.ProductDataSheets.AsNoTracking()
+                .Where(ds => !ds.IsDeleted && (!ds.ProjectId.HasValue || authorizedProjectIds.Contains(ds.ProjectId.Value)));
+
+            if (projectId.HasValue) dataSheetsQuery = dataSheetsQuery.Where(ds => ds.ProjectId == projectId.Value);
+            if (siteId.HasValue) dataSheetsQuery = dataSheetsQuery.Where(ds => ds.SiteId == siteId.Value);
+            if (dateFrom.HasValue) dataSheetsQuery = dataSheetsQuery.Where(ds => ds.CreatedAt >= dateFrom.Value);
+            if (dateTo.HasValue) dataSheetsQuery = dataSheetsQuery.Where(ds => ds.CreatedAt <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                dataSheetsQuery = dataSheetsQuery.Where(ds => ds.Product.ToLower().Contains(term) || (ds.Manufacturer != null && ds.Manufacturer.ToLower().Contains(term)) || (ds.Model != null && ds.Model.ToLower().Contains(term)) || (ds.PartNumber != null && ds.PartNumber.ToLower().Contains(term)));
+
+            var dataSheets = await dataSheetsQuery.Take(10)
+                .Select(ds => new SearchResultItemDto("DataSheet", ds.Id, ds.Product, $"Mfr: {ds.Manufacturer} | Model: {ds.Model}", "Active", ds.CreatedAt, $"/datasheets/{ds.Id}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(dataSheets);
+        }
+
+        // 10. Chat Messages
+        if (string.IsNullOrEmpty(entityType) || entityType.Equals("Message", StringComparison.OrdinalIgnoreCase))
+        {
+            var chatQuery = _dbContext.Messages.AsNoTracking()
+                .Where(m => !m.IsDeleted && m.Conversation.Members.Any(mb => mb.UserId == currentUserId));
+
+            if (dateFrom.HasValue) chatQuery = chatQuery.Where(m => m.CreatedAt >= dateFrom.Value);
+            if (dateTo.HasValue) chatQuery = chatQuery.Where(m => m.CreatedAt <= dateTo.Value);
+            if (!string.IsNullOrWhiteSpace(term))
+                chatQuery = chatQuery.Where(m => m.Content.ToLower().Contains(term));
+
+            var chatMessages = await chatQuery
+                .OrderByDescending(m => m.CreatedAt)
+                .Take(8)
+                .Select(m => new SearchResultItemDto(
+                    "ChatMessage",
+                    m.Id,
+                    m.Content.Length > 80 ? m.Content.Substring(0, 80) : m.Content,
+                    m.Sender != null ? (m.Sender.FirstName + " " + m.Sender.LastName) : null,
+                    "Message",
+                    m.CreatedAt,
+                    $"/chat/{m.ConversationId}"))
+                .ToListAsync(cancellationToken);
+            results.AddRange(chatMessages);
+        }
+
+        return Ok(new GlobalSearchResponseDto(q ?? string.Empty, results.Count, results));
+    }
+
+    // ==========================================
+    // UX-05: MTI Activity Center (Unified Activity Timeline)
+    // ==========================================
+
+    [HttpGet("activity")]
+    public async Task<ActionResult<ApiResponse<List<ActivityTimelineItemDto>>>> GetActivityTimeline(
+        [FromQuery] Guid? projectId = null,
+        [FromQuery] Guid? siteId = null,
+        [FromQuery] Guid? userId = null,
+        [FromQuery] Guid? teamId = null,
+        [FromQuery] string? activityType = null,
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdString, out var currentUserId)) return Unauthorized();
+
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("SuperAdmin");
+        var authorizedProjectIds = isAdmin
+            ? await _dbContext.Projects.Where(p => !p.IsDeleted).Select(p => p.Id).ToListAsync(cancellationToken)
+            : (await _resourceAuthorization.GetAuthorizedProjectIdsAsync(currentUserId, cancellationToken: cancellationToken)).ToList();
+        var authorizedSiteIds = isAdmin
+            ? await _dbContext.Sites.Where(s => !s.IsDeleted).Select(s => s.Id).ToListAsync(cancellationToken)
+            : (await _resourceAuthorization.GetAuthorizedSiteIdsAsync(currentUserId, cancellationToken: cancellationToken)).ToList();
+
+        var query = _dbContext.AuditLogs.AsNoTracking().AsQueryable();
+
+        // Security scoping: non-admins only see logs within their authorized scopes or own user actions
+        if (!isAdmin)
+        {
+            query = query.Where(a =>
+                (a.ProjectId.HasValue && authorizedProjectIds.Contains(a.ProjectId.Value)) ||
+                (a.SiteId.HasValue && authorizedSiteIds.Contains(a.SiteId.Value)) ||
+                a.UserId == currentUserId);
+        }
+
+        if (projectId.HasValue)
+        {
+            if (!isAdmin && !authorizedProjectIds.Contains(projectId.Value)) return Forbid();
+            query = query.Where(a => a.ProjectId == projectId.Value);
+        }
+
+        if (siteId.HasValue)
+        {
+            if (!isAdmin && !authorizedSiteIds.Contains(siteId.Value)) return Forbid();
+            query = query.Where(a => a.SiteId == siteId.Value);
+        }
+
+        if (userId.HasValue)
+        {
+            query = query.Where(a => a.UserId == userId.Value);
+        }
+
+        if (teamId.HasValue)
+        {
+            var teamMemberIds = await _dbContext.TeamMembers
+                .Where(tm => tm.TeamId == teamId.Value)
+                .Select(tm => tm.UserId)
+                .ToListAsync(cancellationToken);
+            query = query.Where(a => a.UserId.HasValue && teamMemberIds.Contains(a.UserId.Value));
+        }
+
+        if (!string.IsNullOrWhiteSpace(activityType))
+        {
+            var at = activityType.Trim().ToLower();
+            query = query.Where(a => a.Action.ToLower().Contains(at) || a.EntityType.ToLower().Contains(at));
+        }
+
+        if (dateFrom.HasValue)
+        {
+            query = query.Where(a => a.CreatedAt >= dateFrom.Value);
+        }
+
+        if (dateTo.HasValue)
+        {
+            query = query.Where(a => a.CreatedAt <= dateTo.Value);
+        }
+
+        var p = Math.Max(1, page);
+        var ps = Math.Clamp(pageSize, 1, 100);
+
+        var items = await query
+            .OrderByDescending(a => a.CreatedAt)
+            .Skip((p - 1) * ps)
+            .Take(ps)
+            .Select(a => new
+            {
+                a.Id,
+                a.UserId,
+                UserName = a.User != null ? (a.User.FirstName + " " + a.User.LastName) : null,
+                UserEmail = a.User != null ? a.User.Email : null,
+                a.Action,
+                a.EntityType,
+                a.EntityId,
+                a.ProjectId,
+                a.SiteId,
+                a.OldValues,
+                a.NewValues,
+                a.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+
+        var projectIdsInLogs = items.Where(x => x.ProjectId.HasValue).Select(x => x.ProjectId!.Value).Distinct().ToList();
+        var siteIdsInLogs = items.Where(x => x.SiteId.HasValue).Select(x => x.SiteId!.Value).Distinct().ToList();
+
+        var projectDict = await _dbContext.Projects
+            .Where(pr => projectIdsInLogs.Contains(pr.Id))
+            .ToDictionaryAsync(pr => pr.Id, pr => pr.Name, cancellationToken);
+
+        var siteDict = await _dbContext.Sites
+            .Where(st => siteIdsInLogs.Contains(st.Id))
+            .ToDictionaryAsync(st => st.Id, st => st.Name, cancellationToken);
+
+        var dtos = items.Select(x => new ActivityTimelineItemDto(
+            x.Id,
+            x.UserId,
+            x.UserName,
+            x.UserEmail,
+            x.Action,
+            x.EntityType,
+            x.EntityId,
+            x.ProjectId,
+            x.ProjectId.HasValue && projectDict.TryGetValue(x.ProjectId.Value, out var pName) ? pName : null,
+            x.SiteId,
+            x.SiteId.HasValue && siteDict.TryGetValue(x.SiteId.Value, out var sName) ? sName : null,
+            x.OldValues,
+            x.NewValues,
+            x.CreatedAt
+        )).ToList();
+
+        return Ok(ApiResponse<List<ActivityTimelineItemDto>>.SuccessResult(dtos));
     }
 
     [HttpGet("reports/dashboard-stats")]

@@ -105,6 +105,7 @@ public interface IAppDbContext
     DbSet<DocumentApproval> DocumentApprovals { get; }
     DbSet<DocumentCorrection> DocumentCorrections { get; }
     DbSet<Drawing> Drawings { get; }
+    DbSet<DrawingRevision> DrawingRevisions { get; }
     DbSet<DrawingMarkup> DrawingMarkups { get; }
     DbSet<ProductDataSheet> ProductDataSheets { get; }
 

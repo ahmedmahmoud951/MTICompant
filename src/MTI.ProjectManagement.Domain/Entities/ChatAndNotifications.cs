@@ -129,6 +129,11 @@ public class Notification : BaseEntity
     public string? BodyKey { get; set; }
     public string? DataJson { get; set; }
     public string? EventKey { get; set; } // Unique event deduplication key
+    public string? DeduplicationKey
+    {
+        get => EventKey;
+        set => EventKey = value;
+    }
     public string? EntityType { get; set; }
     public string? EntityId { get; set; }
     public bool IsRead { get; set; } = false;

@@ -212,7 +212,43 @@ public record DrawingDto(
     string? FileExtension,
     long FileSizeBytes,
     int MarkupsCount,
+    string? DownloadUrl,
+    bool IsLocked = false,
+    Guid? CurrentRevisionId = null,
+    List<DrawingRevisionDto>? Revisions = null
+);
+
+public record DrawingRevisionDto(
+    Guid Id,
+    Guid DrawingId,
+    string Revision,
+    int VersionNumber,
+    bool IsCurrent,
+    string StorageKey,
+    string? FileName,
+    string? FileExtension,
+    long FileSizeBytes,
+    Guid UploadedBy,
+    string UploaderName,
+    DateTime UploadedAt,
+    DocumentStatus Status,
+    Guid? ApprovedBy,
+    string? ApproverName,
+    DateTime? ApprovedAt,
+    string? ChangeReason,
+    string? Comments,
+    bool IsLocked,
     string? DownloadUrl
+);
+
+public record CreateDrawingRevisionRequest(
+    string Revision,
+    string StorageKey,
+    string? FileName,
+    string? FileExtension,
+    long FileSizeBytes,
+    string? ChangeReason = null,
+    string? Comments = null
 );
 
 public record CreateDrawingRequest(
@@ -226,7 +262,8 @@ public record CreateDrawingRequest(
     string StorageKey,
     string? FileName,
     string? FileExtension,
-    long FileSizeBytes
+    long FileSizeBytes,
+    string? ChangeReason = null
 );
 
 public record UpdateDrawingStatusRequest(

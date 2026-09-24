@@ -24,7 +24,8 @@ import {
   Plus,
   RefreshCw,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  Activity
 } from 'lucide-react';
 import { Project, Site, User } from '@/types';
 import { Language, formatDateCairo } from '@/lib/i18n';
@@ -40,6 +41,7 @@ import { DataSheetsWorkspace } from '@/features/documents/DataSheetsWorkspace';
 import { SiteOperationsManager } from '@/features/operations/SiteOperationsManager';
 import { DailySiteReportsManager } from '@/features/reports/DailySiteReportsManager';
 import { DocumentsManager } from '@/features/documents/DocumentsManager';
+import { ActivityTimeline } from '@/components/ActivityTimeline';
 
 export type SiteWorkspaceTab =
   | 'overview'
@@ -53,6 +55,7 @@ export type SiteWorkspaceTab =
   | 'issues'
   | 'assets'
   | 'team'
+  | 'activity'
   | 'chat';
 
 interface SiteWorkspaceProps {
@@ -168,6 +171,7 @@ export const SiteWorkspace: React.FC<SiteWorkspaceProps> = ({
     { id: 'issues', label: lang === 'ar' ? 'الملاحظات والمعلقات' : 'Issues & Snags', icon: AlertTriangle },
     { id: 'assets', label: lang === 'ar' ? 'الأصول والمعدات' : 'Assets', icon: Package },
     { id: 'team', label: lang === 'ar' ? 'فريق الموقع' : 'Site Team', icon: Users, count: counts.members },
+    { id: 'activity', label: lang === 'ar' ? 'سجل النشاط' : 'Activity', icon: Activity },
     { id: 'chat', label: lang === 'ar' ? 'المحادثة والتواصل' : 'Site Chat', icon: MessageSquare }
   ];
 
@@ -207,13 +211,65 @@ export const SiteWorkspace: React.FC<SiteWorkspaceProps> = ({
               {site.address && (
                 <p className="text-xs text-slate-400 mt-0.5">{site.address}</p>
               )}
+
+              {/* UX-03 Header Metadata Grid */}
+              <div className="flex items-center gap-3 flex-wrap pt-2 text-[11px] text-slate-300">
+                <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
+                  <Users className="w-3 h-3 text-cyan-400" />
+                  <span className="text-slate-400">{lang === 'ar' ? 'مدير الموقع:' : 'Site Manager:'}</span>
+                  <span className="font-semibold text-white">
+                    {(site as any).siteManagerName || (site as any).assignments?.find((a: any) => a.role?.includes('Manager'))?.userName || (lang === 'ar' ? 'مهندس الموقع' : 'Site Engineer')}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
+                  <Calendar className="w-3 h-3 text-indigo-400" />
+                  <span className="text-slate-400">{lang === 'ar' ? 'تاريخ البدء:' : 'Start:'}</span>
+                  <span className="font-mono text-white">
+                    {(site as any).startDate ? formatDateCairo((site as any).startDate, lang) : (project?.startDate ? formatDateCairo(project.startDate, lang) : '—')}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
+                  <Calendar className="w-3 h-3 text-purple-400" />
+                  <span className="text-slate-400">{lang === 'ar' ? 'الانتهاء المستهدف:' : 'Target:'}</span>
+                  <span className="font-mono text-white">
+                    {(site as any).targetCompletionDate ? formatDateCairo((site as any).targetCompletionDate, lang) : (project?.endDate ? formatDateCairo(project.endDate, lang) : '—')}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 bg-slate-900/80 px-2.5 py-1 rounded-lg border border-slate-700/60">
+                  <Clock className="w-3 h-3 text-amber-400" />
+                  <span className="text-slate-400">{lang === 'ar' ? 'الأيام المتبقية:' : 'Days Left:'}</span>
+                  <span className="font-bold font-mono text-amber-300">
+                    {(() => {
+                      const target = (site as any).targetCompletionDate || project?.endDate;
+                      if (!target) return '—';
+                      const diff = Math.ceil((new Date(target).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                      return `${diff} ${lang === 'ar' ? 'يوم' : 'd'}`;
+                    })()}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap text-xs text-slate-300">
+          <div className="flex flex-col sm:items-end gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-slate-400 font-bold">{lang === 'ar' ? 'نسبة الإنجاز:' : 'Progress:'}</span>
+              <span className="text-cyan-300 font-extrabold font-mono text-sm">
+                {(site as any).progressPercentage ?? 0}%
+              </span>
+            </div>
+            <div className="w-32 bg-slate-800 rounded-full h-1.5 overflow-hidden border border-slate-700">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-sky-400 to-cyan-400"
+                style={{ width: `${Math.min(100, Math.max(0, (site as any).progressPercentage ?? 0))}%` }}
+              />
+            </div>
             <button
               onClick={loadSiteOverviewData}
-              className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors"
+              className="mt-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors self-start sm:self-auto"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               {lang === 'ar' ? 'تحديث' : 'Refresh'}
@@ -581,6 +637,15 @@ export const SiteWorkspace: React.FC<SiteWorkspaceProps> = ({
               : 'Direct communication channel between site engineers and operations management.'}
           </p>
         </div>
+      )}
+
+      {/* Tab 13: Activity Center */}
+      {activeTab === 'activity' && (
+        <ActivityTimeline
+          siteId={site.id}
+          lang={lang}
+          title={lang === 'ar' ? `سجل النشاط الميداني لموقع ${site.name}` : `Field Activity Timeline for ${site.name}`}
+        />
       )}
     </div>
   );

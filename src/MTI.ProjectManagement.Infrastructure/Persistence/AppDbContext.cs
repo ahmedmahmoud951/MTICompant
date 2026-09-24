@@ -110,6 +110,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<DocumentApproval> DocumentApprovals => Set<DocumentApproval>();
     public DbSet<DocumentCorrection> DocumentCorrections => Set<DocumentCorrection>();
     public DbSet<Drawing> Drawings => Set<Drawing>();
+    public DbSet<DrawingRevision> DrawingRevisions => Set<DrawingRevision>();
     public DbSet<DrawingMarkup> DrawingMarkups => Set<DrawingMarkup>();
     public DbSet<ProductDataSheet> ProductDataSheets => Set<ProductDataSheet>();
 
@@ -1208,6 +1209,132 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.HasIndex(e => e.TargetUserId);
             entity.HasIndex(e => e.TargetTeamId);
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        modelBuilder.Entity<Drawing>(entity =>
+        {
+            entity.ToTable("Drawings");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.DrawingNumber).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.DrawingTitle).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Revision).HasMaxLength(50);
+            entity.Property(e => e.StorageKey).IsRequired().HasMaxLength(1000);
+            entity.Property(e => e.FileName).HasMaxLength(500);
+            entity.Property(e => e.FileExtension).HasMaxLength(50);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+
+            entity.HasOne(e => e.Project)
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Site)
+                .WithMany()
+                .HasForeignKey(e => e.SiteId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.UploaderUser)
+                .WithMany()
+                .HasForeignKey(e => e.UploadedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ApproverUser)
+                .WithMany()
+                .HasForeignKey(e => e.ApprovedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.ProjectId, e.SiteId });
+            entity.HasIndex(e => e.Discipline);
+            entity.HasIndex(e => e.DrawingNumber);
+        });
+
+        modelBuilder.Entity<DrawingRevision>(entity =>
+        {
+            entity.ToTable("DrawingRevisions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Revision).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.StorageKey).IsRequired().HasMaxLength(1000);
+            entity.Property(e => e.FileName).HasMaxLength(500);
+            entity.Property(e => e.FileExtension).HasMaxLength(50);
+            entity.Property(e => e.ChangeReason).HasMaxLength(1000);
+            entity.Property(e => e.Comments).HasMaxLength(2000);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+
+            entity.HasOne(e => e.Drawing)
+                .WithMany(d => d.Revisions)
+                .HasForeignKey(e => e.DrawingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.UploaderUser)
+                .WithMany()
+                .HasForeignKey(e => e.UploadedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.ApproverUser)
+                .WithMany()
+                .HasForeignKey(e => e.ApprovedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.DrawingId);
+            entity.HasIndex(e => new { e.DrawingId, e.IsCurrent });
+        });
+
+        modelBuilder.Entity<DrawingMarkup>(entity =>
+        {
+            entity.ToTable("DrawingMarkups");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Text).HasMaxLength(2000);
+            entity.Property(e => e.Color).HasMaxLength(50);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+
+            entity.HasOne(e => e.Drawing)
+                .WithMany(d => d.Markups)
+                .HasForeignKey(e => e.DrawingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Revision)
+                .WithMany()
+                .HasForeignKey(e => e.RevisionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => e.DrawingId);
+        });
+
+        modelBuilder.Entity<ProductDataSheet>(entity =>
+        {
+            entity.ToTable("ProductDataSheets");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Product).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Manufacturer).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Model).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.PartNumber).HasMaxLength(100);
+            entity.Property(e => e.Category).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.StorageKey).HasMaxLength(1000);
+            entity.Property(e => e.FileName).HasMaxLength(500);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+
+            entity.HasOne(e => e.Project)
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(e => e.Site)
+                .WithMany()
+                .HasForeignKey(e => e.SiteId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.UploaderUser)
+                .WithMany()
+                .HasForeignKey(e => e.UploadedBy)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(e => new { e.ProjectId, e.SiteId });
+            entity.HasIndex(e => e.Category);
         });
     }
 

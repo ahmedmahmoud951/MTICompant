@@ -946,11 +946,12 @@ export function getTranslation(key: TranslationKey, lang: Language): string {
   return (dict as any)[key] || (translations.ar as any)[key] || (translations.en as any)[key] || key;
 }
 
-export function formatDateCairo(isoString?: string | null): string {
+export function formatDateCairo(isoString?: string | null, lang: Language = 'ar'): string {
   if (!isoString) return '—';
   try {
     const d = new Date(isoString);
-    return new Intl.DateTimeFormat('ar-EG', {
+    const locale = lang === 'ar' ? 'ar-EG' : 'en-US';
+    return new Intl.DateTimeFormat(locale, {
       timeZone: 'Africa/Cairo',
       year: 'numeric',
       month: 'short',

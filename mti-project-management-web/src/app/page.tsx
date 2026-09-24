@@ -50,8 +50,11 @@ import {
   MainDashboard,
   DrawingsWorkspace,
   DataSheetsWorkspace,
-  SiteWorkspace
+  SiteWorkspace,
+  ProjectWorkspace
 } from '@/features';
+import { GlobalSearchModal } from '@/components/GlobalSearchModal';
+import { ActivityTimeline } from '@/components/ActivityTimeline';
 import {
   Compass,
   Cpu,
@@ -153,6 +156,8 @@ export default function Home() {
   const [loadingAllSites, setLoadingAllSites] = useState(false);
   const [loadingSites, setLoadingSites] = useState(false);
   const [activeWorkspaceSite, setActiveWorkspaceSite] = useState<Site | null>(null);
+  const [activeWorkspaceProject, setActiveWorkspaceProject] = useState<Project | null>(null);
+  const [showGlobalSearchModal, setShowGlobalSearchModal] = useState<boolean>(false);
 
   // Tasks
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -2470,20 +2475,22 @@ export default function Home() {
     });
   };
 
-  // Global Search
-  const handleGlobalSearch = async (e: React.FormEvent) => {
+  // Global Search (UX-04 Enterprise Search)
+  const handleGlobalSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!globalSearchQuery.trim()) return;
-    setIsSearching(true);
-    try {
-      const res = await dashboardService.search(globalSearchQuery);
-      setSearchResults(res.results || []);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSearching(false);
-    }
+    setShowGlobalSearchModal(true);
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowGlobalSearchModal((prev) => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Export CSV Helper (Uses dynamic API_BASE_URL for cloud & local)
   const downloadCsv = (entityType: string) => {
@@ -2699,6 +2706,7 @@ export default function Home() {
     { id: 'reports-archive', label: t('navReportsArchive'), icon: ShieldCheck, badge: approvedRecords.length },
     { id: 'approvals', label: t('navApprovals'), icon: FileCheck, badge: pendingRecords.length },
     { id: 'tasks', label: t('navTasks'), icon: CheckSquare },
+    { id: 'activity', label: lang === 'ar' ? 'مركز النشاط والعمليات' : 'Activity Center', icon: Activity },
     { id: 'chat', label: t('navChat'), icon: MessageSquare },
     { id: 'notifications', label: t('navNotifications'), icon: Bell },
     { id: 'reports', label: t('navReports'), icon: BarChart3 },
@@ -2715,6 +2723,7 @@ export default function Home() {
     { id: 'datasheets', label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets', icon: Cpu },
     { id: 'operations', label: t('navSiteOperations'), icon: Wrench },
     { id: 'daily-reports', label: t('navDailyReports'), icon: FileSpreadsheet },
+    { id: 'activity', label: lang === 'ar' ? 'مركز النشاط والعمليات' : 'Activity Center', icon: Activity },
     { id: 'my-sites', label: t('navMySites'), icon: MapPin },
     { id: 'my-data', label: t('navMyData'), icon: FileSpreadsheet },
     { id: 'reports-archive', label: t('navReportsArchive'), icon: ShieldCheck, badge: approvedRecords.length },
@@ -2735,6 +2744,7 @@ export default function Home() {
     { id: 'operations', label: t('navSiteOperations'), icon: Wrench },
     { id: 'daily-reports', label: t('navDailyReports'), icon: FileSpreadsheet },
     { id: 'technical-office', label: t('navTechnicalOffice'), icon: Briefcase },
+    { id: 'activity', label: lang === 'ar' ? 'مركز النشاط والعمليات' : 'Activity Center', icon: Activity },
     { id: 'my-sites', label: t('navMySites'), icon: MapPin },
     { id: 'my-data', label: t('navMyData'), icon: FileSpreadsheet },
     { id: 'reports-archive', label: t('navReportsArchive'), icon: ShieldCheck, badge: approvedRecords.length },
@@ -2996,16 +3006,18 @@ export default function Home() {
               </div>
             </div>
 
-            <form onSubmit={handleGlobalSearch} className="relative max-w-md w-full hidden md:block">
-              <Search className="w-5 h-5 absolute left-3.5 rtl:left-auto rtl:right-3.5 top-1/2 -translate-y-1/2 text-cyan-300" strokeWidth={2.4} />
-              <input
-                type="text"
-                value={globalSearchQuery}
-                onChange={(e) => setGlobalSearchQuery(e.target.value)}
-                placeholder={t('searchPlaceholder')}
-                className="field-input w-full pl-11 rtl:pl-4 rtl:pr-11 pr-4 py-2.5 rounded-xl text-sm font-medium text-slate-50 placeholder:text-slate-400 border-cyan-400/40"
-              />
-            </form>
+            <div
+              onClick={() => setShowGlobalSearchModal(true)}
+              className="relative max-w-md w-full hidden md:block cursor-pointer group"
+            >
+              <Search className="w-5 h-5 absolute left-3.5 rtl:left-auto rtl:right-3.5 top-1/2 -translate-y-1/2 text-cyan-300 group-hover:text-cyan-200 transition-colors" strokeWidth={2.4} />
+              <div className="field-input w-full pl-11 rtl:pl-4 rtl:pr-11 pr-14 py-2 rounded-xl text-xs font-medium text-slate-400 border-cyan-400/40 group-hover:border-cyan-400/80 transition-all flex items-center justify-between select-none">
+                <span className="truncate">{t('searchPlaceholder')}</span>
+                <kbd className="px-1.5 py-0.5 text-[10px] font-mono bg-slate-800/80 border border-slate-700 rounded text-slate-400 flex items-center gap-0.5">
+                  <span>Ctrl</span>+<span>K</span>
+                </kbd>
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
@@ -3321,16 +3333,26 @@ export default function Home() {
                   onNavigate={(tab) => setActiveTab(tab)}
                   onOpenProject={(p) => {
                     selectProject(p.id);
-                    setDrawerData({ title: p.name, type: 'Project', details: p });
+                    setActiveWorkspaceProject(p);
+                    setActiveTab('projects');
                   }}
                   translateStatus={translateStatusLabel}
                 />
               )}
 
               {/* ======================================================== */}
-              {/* VIEW: PROJECTS / MY PROJECTS */}
+              {/* VIEW: PROJECTS / MY PROJECTS (UX-02 Project Workspace) */}
               {/* ======================================================== */}
               {(activeTab === 'projects' || activeTab === 'my-projects') && (
+                activeWorkspaceProject ? (
+                  <ProjectWorkspace
+                    project={activeWorkspaceProject}
+                    allSites={allSites.filter((s) => s.projectId === activeWorkspaceProject.id)}
+                    currentUser={currentUser}
+                    lang={lang}
+                    onBack={() => setActiveWorkspaceProject(null)}
+                  />
+                ) : (
                 <div className="projects-workspace grid grid-cols-1 xl:grid-cols-12 gap-5">
                   {/* Project list */}
                   <div className="xl:col-span-4 projects-panel rounded-2xl p-4 flex flex-col min-h-[620px]">
@@ -3433,6 +3455,17 @@ export default function Home() {
                                   </button>
                                 </div>
                               )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setActiveWorkspaceProject(proj);
+                                }}
+                                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-cyan-600/30 hover:bg-cyan-600 text-cyan-200 hover:text-white border border-cyan-500/40 text-[11px] font-bold transition shadow-sm mt-1"
+                              >
+                                <FolderKanban className="w-3.5 h-3.5" />
+                                {lang === 'ar' ? 'مساحة عمل المشروع الموحدة' : 'Open Workspace'}
+                              </button>
                             </div>
                           </div>
                         );
@@ -3568,7 +3601,8 @@ export default function Home() {
                     </div>
                   </div>
                 </div>
-              )}
+              )
+            )}
 
               {/* ======================================================== */}
               {/* VIEW: SITES (standalone page) */}
@@ -6543,6 +6577,26 @@ export default function Home() {
                   />
                 </div>
               )}
+
+              {/* ======================================================== */}
+              {/* VIEW: ACTIVITY CENTER (PROMPT UX-05) */}
+              {/* ======================================================== */}
+              {activeTab === 'activity' && (
+                <div className="space-y-6 animate-fade-up">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                        <Activity className="w-5 h-5 text-cyan-400" />
+                        {lang === 'ar' ? 'مركز النشاط والعمليات الموحد (Activity Center)' : 'Unified Enterprise Activity Center'}
+                      </h2>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {lang === 'ar' ? 'سجل تفاعلي زمني لجميع الأحداث، التعديلات، والمستندات عبر المنظومة' : 'Real-time audit log of all system events, revisions, and operations'}
+                      </p>
+                    </div>
+                  </div>
+                  <ActivityTimeline projects={projects} lang={lang} />
+                </div>
+              )}
             </>
           )}
         </main>
@@ -8649,6 +8703,41 @@ export default function Home() {
           ))}
         </div>
       )}
+
+      {/* UX-04 Global Enterprise Search Modal */}
+      <GlobalSearchModal
+        isOpen={showGlobalSearchModal}
+        onClose={() => setShowGlobalSearchModal(false)}
+        lang={lang}
+        onSelectResult={(item) => {
+          setShowGlobalSearchModal(false);
+          if (item.type === 'Project') {
+            const p = projects.find((pr) => pr.id === item.id);
+            if (p) {
+              setActiveWorkspaceProject(p);
+              setActiveTab('projects');
+            }
+          } else if (item.type === 'Site') {
+            const s = allSites.find((st) => st.id === item.id);
+            if (s) {
+              setActiveWorkspaceSite(s);
+              setActiveTab('sites');
+            }
+          } else if (item.type === 'Drawing') {
+            setActiveTab('drawings');
+          } else if (item.type === 'Document') {
+            setActiveTab('documents');
+          } else if (item.type === 'DailyReport') {
+            setActiveTab('daily-reports');
+          } else if (item.type === 'DataSheet') {
+            setActiveTab('datasheets');
+          } else if (item.type === 'Task') {
+            setActiveTab('tasks');
+          } else if (item.type === 'Message') {
+            setActiveTab('chat');
+          }
+        }}
+      />
     </div>
   );
 }

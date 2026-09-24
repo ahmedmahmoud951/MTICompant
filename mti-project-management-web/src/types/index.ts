@@ -71,6 +71,9 @@ export interface Project {
   createdAt: string;
   /** Optional cover (URL or data URL). Empty → default card image. */
   coverImageUrl?: string | null;
+  projectManagerName?: string;
+  projectManagerId?: string;
+  members?: Array<{ id: string; name: string; email?: string; role?: string }>;
 }
 
 export interface Site {
@@ -1695,6 +1698,29 @@ export interface CreateDrawingMarkupRequest {
   color?: string;
 }
 
+export interface DrawingRevisionDto {
+  id: string;
+  drawingId: string;
+  revision: string;
+  versionNumber: number;
+  fileId?: string;
+  storageKey: string;
+  fileName?: string;
+  fileExtension?: string;
+  fileSizeBytes: number;
+  status: string;
+  isCurrent: boolean;
+  changeReason?: string;
+  uploadedBy: string;
+  uploaderName: string;
+  uploadedAt: string;
+  approvedBy?: string;
+  approverName?: string;
+  approvedAt?: string;
+  approvalComments?: string;
+  downloadUrl?: string;
+}
+
 export interface DrawingDto {
   id: string;
   projectId: string;
@@ -1709,6 +1735,8 @@ export interface DrawingDto {
   revision: string;
   version: number;
   status: string;
+  isLocked?: boolean;
+  currentRevisionId?: string;
   uploadedBy: string;
   uploaderName: string;
   uploadedAt: string;
@@ -1721,6 +1749,7 @@ export interface DrawingDto {
   fileSizeBytes: number;
   markupsCount: number;
   downloadUrl?: string;
+  revisions?: DrawingRevisionDto[];
 }
 
 export interface CreateDrawingRequest {
@@ -1735,6 +1764,16 @@ export interface CreateDrawingRequest {
   fileName?: string;
   fileExtension?: string;
   fileSizeBytes: number;
+  changeReason?: string;
+}
+
+export interface CreateDrawingRevisionRequest {
+  revision: string;
+  storageKey: string;
+  fileName?: string;
+  fileExtension?: string;
+  fileSizeBytes: number;
+  changeReason: string;
 }
 
 // ============================================================
@@ -1779,6 +1818,41 @@ export interface CreateProductDataSheetRequest {
   storageKey?: string;
   fileName?: string;
   fileSizeBytes: number;
+}
+
+// ============================================================
+// UX-04 & UX-05: Enterprise Global Search & Activity Center
+// ============================================================
+export interface GlobalSearchFilters {
+  q?: string;
+  projectId?: string;
+  siteId?: string;
+  departmentId?: string;
+  teamId?: string;
+  userId?: string;
+  category?: string;
+  documentType?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  status?: string;
+  entityType?: string;
+}
+
+export interface ActivityTimelineItem {
+  id: string;
+  userId?: string;
+  userName?: string;
+  userEmail?: string;
+  action: string;
+  entityType: string;
+  entityId?: string;
+  projectId?: string;
+  projectName?: string;
+  siteId?: string;
+  siteName?: string;
+  oldValues?: string;
+  newValues?: string;
+  createdAt: string;
 }
 
 

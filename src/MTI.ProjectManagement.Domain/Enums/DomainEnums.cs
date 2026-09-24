@@ -162,7 +162,8 @@ public enum DocumentStatus
     Approved = 4,
     Rejected = 5,
     CorrectionRequested = 6,
-    Locked = 7
+    Locked = 7,
+    Archived = 8
 }
 
 public enum DocumentVersionStatus
