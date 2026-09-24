@@ -103,12 +103,15 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<ProjectAssignment> ProjectAssignments => Set<ProjectAssignment>();
     public DbSet<TaskEvent> TaskEvents => Set<TaskEvent>();
 
-    // Enterprise Documents
+    // Enterprise Documents & Drawings & DataSheets
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<DocumentType> DocumentTypes => Set<DocumentType>();
     public DbSet<DocumentVersion> DocumentVersions => Set<DocumentVersion>();
     public DbSet<DocumentApproval> DocumentApprovals => Set<DocumentApproval>();
     public DbSet<DocumentCorrection> DocumentCorrections => Set<DocumentCorrection>();
+    public DbSet<Drawing> Drawings => Set<Drawing>();
+    public DbSet<DrawingMarkup> DrawingMarkups => Set<DrawingMarkup>();
+    public DbSet<ProductDataSheet> ProductDataSheets => Set<ProductDataSheet>();
 
     // Site Operations & Daily Reports (OPERATIONS-01 & SITE-REPORT-01)
     public DbSet<SiteOperation> SiteOperations => Set<SiteOperation>();
@@ -922,6 +925,59 @@ public class AppDbContext : DbContext, IAppDbContext
             entity.HasOne(e => e.Requester).WithMany().HasForeignKey(e => e.RequestedBy).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Assignee).WithMany().HasForeignKey(e => e.RequestedTo).OnDelete(DeleteBehavior.Restrict);
         });
+
+        // DRAW-01: Drawings
+        modelBuilder.Entity<Drawing>(entity =>
+        {
+            entity.ToTable("Drawings");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.ProjectId, e.SiteId });
+            entity.HasIndex(e => e.Discipline);
+            entity.Property(e => e.DrawingNumber).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.DrawingTitle).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Revision).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.StorageKey).HasMaxLength(1000).IsRequired();
+            entity.HasOne(e => e.Project).WithMany().HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Site).WithMany().HasForeignKey(e => e.SiteId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.Document).WithMany().HasForeignKey(e => e.DocumentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.UploaderUser).WithMany().HasForeignKey(e => e.UploadedBy).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ApproverUser).WithMany().HasForeignKey(e => e.ApprovedBy).OnDelete(DeleteBehavior.SetNull);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // DRAW-02: DrawingMarkups
+        modelBuilder.Entity<DrawingMarkup>(entity =>
+        {
+            entity.ToTable("DrawingMarkups");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.DrawingId);
+            entity.Property(e => e.PositionJson).IsRequired();
+            entity.Property(e => e.Color).HasMaxLength(50);
+            entity.HasOne(e => e.Drawing).WithMany(d => d.Markups).HasForeignKey(e => e.DrawingId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User).WithMany().HasForeignKey(e => e.UserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        // DOC-06: ProductDataSheets
+        modelBuilder.Entity<ProductDataSheet>(entity =>
+        {
+            entity.ToTable("ProductDataSheets");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.ProjectId, e.SiteId });
+            entity.HasIndex(e => e.Category);
+            entity.Property(e => e.Product).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Manufacturer).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Model).HasMaxLength(255).IsRequired();
+            entity.Property(e => e.Category).HasMaxLength(100).IsRequired();
+            entity.HasOne(e => e.Document).WithMany().HasForeignKey(e => e.DocumentId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.Project).WithMany().HasForeignKey(e => e.ProjectId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.Site).WithMany().HasForeignKey(e => e.SiteId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.Asset).WithMany().HasForeignKey(e => e.AssetId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.Material).WithMany().HasForeignKey(e => e.MaterialId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.UploaderUser).WithMany().HasForeignKey(e => e.UploadedBy).OnDelete(DeleteBehavior.Restrict);
+            entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
 
         // Site Operations & Daily Reports (OPERATIONS-01 & SITE-REPORT-01)
         modelBuilder.Entity<SiteOperation>(entity =>

@@ -361,3 +361,101 @@ public enum ResourceHierarchyType
     Media = 9
 }
 
+// ==========================================
+// CORE-01 & DOC-01: Standard Document Categories
+// ==========================================
+public enum DocumentCategory
+{
+    TechnicalOffice = 1,
+    Accounting = 2,
+    Drawings = 3,
+    DailyReports = 4,
+    SiteDocuments = 5,
+    DataSheets = 6,
+    Software = 7,
+    Installation = 8,
+    Maintenance = 9,
+    Contracts = 10,
+    Procurement = 11,
+    Other = 12
+}
+
+// ==========================================
+// DRAW-01: Drawing Disciplines
+// ==========================================
+public enum DrawingDiscipline
+{
+    Architecture = 1,
+    Electrical = 2,
+    Mechanical = 3,
+    CCTV = 4,
+    AccessControl = 5,
+    Network = 6,
+    FireAlarm = 7,
+    Security = 8,
+    Civil = 9,
+    Other = 10
+}
+
+public enum DrawingType
+{
+    CADDrawing = 1,
+    ShopDrawing = 2,
+    AsBuiltDrawing = 3,
+    TechnicalDrawing = 4,
+    PDFDrawing = 5,
+    ImageDrawing = 6,
+    Other = 7
+}
+
+// ==========================================
+// DRAW-02: Drawing Markups
+// ==========================================
+public enum DrawingMarkupType
+{
+    Pin = 1,
+    Rectangle = 2,
+    Circle = 3,
+    Arrow = 4,
+    Line = 5,
+    Text = 6,
+    Cloud = 7,
+    Comment = 8
+}
+
+// ==========================================
+// DOC-04: Technical Office Document Types
+// ==========================================
+public enum TechnicalOfficeDocumentType
+{
+    TechnicalOffer = 1,
+    BOQ = 2,
+    Quotation = 3,
+    MaterialSubmittal = 4,
+    TechnicalSubmittal = 5,
+    MethodStatement = 6,
+    ShopDrawing = 7,
+    AsBuiltDrawing = 8,
+    Specification = 9,
+    Calculation = 10,
+    TechnicalCorrespondence = 11
+}
+
+// ==========================================
+// DOC-05: Accounting Document Types
+// ==========================================
+public enum AccountingDocumentType
+{
+    Invoice = 1,
+    PurchaseInvoice = 2,
+    SalesInvoice = 3,
+    PaymentDocument = 4,
+    Receipt = 5,
+    FinancialReport = 6,
+    CostSheet = 7,
+    ExpenseDocument = 8,
+    PaymentCertificate = 9,
+    OtherFinancialDocument = 10
+}
+
+

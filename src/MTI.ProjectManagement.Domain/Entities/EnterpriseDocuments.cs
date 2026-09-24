@@ -38,6 +38,15 @@ public class Document : FullAuditedEntity
 
     public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
 
+    // CORE-01 & DOC-01: Central Document Center category & direct file metadata
+    public DocumentCategory Category { get; set; } = DocumentCategory.Other;
+    public string? FileName { get; set; }
+    public string? FileExtension { get; set; }
+    public string? MimeType { get; set; }
+    public long FileSize { get; set; } = 0;
+    public string? StorageKey { get; set; }
+    public int VersionNumber { get; set; } = 1;
+
     public Guid? CurrentVersionId { get; set; }
     public DocumentVersion? CurrentVersion { get; set; }
 
@@ -131,3 +140,98 @@ public class DocumentCorrection : BaseEntity
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ResolvedAt { get; set; }
 }
+
+// ==========================================
+// DRAW-01: Drawing Management Entity
+// ==========================================
+public class Drawing : FullAuditedEntity
+{
+    public Guid ProjectId { get; set; }
+    public Project Project { get; set; } = null!;
+
+    public Guid? SiteId { get; set; }
+    public Site? Site { get; set; }
+
+    public Guid? DocumentId { get; set; }
+    public Document? Document { get; set; }
+
+    public string DrawingNumber { get; set; } = string.Empty;
+    public string DrawingTitle { get; set; } = string.Empty;
+    public DrawingDiscipline Discipline { get; set; } = DrawingDiscipline.Other;
+    public DrawingType DrawingType { get; set; } = DrawingType.ShopDrawing;
+    public string Revision { get; set; } = "A";
+    public int Version { get; set; } = 1;
+    public DocumentStatus Status { get; set; } = DocumentStatus.Draft;
+
+    public Guid UploadedBy { get; set; }
+    public User UploaderUser { get; set; } = null!;
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+
+    public Guid? ApprovedBy { get; set; }
+    public User? ApproverUser { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+
+    public string StorageKey { get; set; } = string.Empty;
+    public string? FileName { get; set; }
+    public string? FileExtension { get; set; }
+    public long FileSizeBytes { get; set; }
+
+    // Navigation
+    public ICollection<DrawingMarkup> Markups { get; set; } = new List<DrawingMarkup>();
+}
+
+// ==========================================
+// DRAW-02: Drawing Markups (Separated from drawing file)
+// ==========================================
+public class DrawingMarkup : BaseEntity
+{
+    public Guid DrawingId { get; set; }
+    public Drawing Drawing { get; set; } = null!;
+
+    public Guid UserId { get; set; }
+    public User User { get; set; } = null!;
+
+    public DrawingMarkupType Type { get; set; } // Pin, Rectangle, Circle, Arrow, Line, Text, Cloud, Comment
+    public string PositionJson { get; set; } = "{}"; // JSON coordinates & bounds
+    public string Text { get; set; } = string.Empty; // Comment / label text
+    public string? Color { get; set; } = "#ef4444";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsDeleted { get; set; } = false;
+}
+
+// ==========================================
+// DOC-06: MTI Data Sheets Entity
+// ==========================================
+public class ProductDataSheet : FullAuditedEntity
+{
+    public Guid? DocumentId { get; set; }
+    public Document? Document { get; set; }
+
+    public Guid? ProjectId { get; set; }
+    public Project? Project { get; set; }
+
+    public Guid? SiteId { get; set; }
+    public Site? Site { get; set; }
+
+    public Guid? AssetId { get; set; }
+    public CompanyAsset? Asset { get; set; }
+
+    public Guid? MaterialId { get; set; }
+    public Material? Material { get; set; }
+
+    public string Product { get; set; } = string.Empty;
+    public string Manufacturer { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public string? PartNumber { get; set; }
+    public string Category { get; set; } = string.Empty; // Camera, Access Control Device, Network Device, Server, UPS, Reader, Barrier, Software Component, etc.
+    public int Version { get; set; } = 1;
+
+    public string? StorageKey { get; set; }
+    public string? FileName { get; set; }
+    public long FileSizeBytes { get; set; }
+
+    public Guid UploadedBy { get; set; }
+    public User UploaderUser { get; set; } = null!;
+    public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+}
+

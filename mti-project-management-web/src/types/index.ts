@@ -577,6 +577,7 @@ export interface DocumentDto {
   editableUntil?: string;
   createdAt: string;
   updatedAt?: string;
+  category?: DocumentCategory | number | string;
 }
 
 export interface DocumentVersionDto {
@@ -869,6 +870,10 @@ export interface DailySiteReportDetailDto extends DailySiteReportDto {
   reviewedByUserName?: string;
   reviewNotes?: string;
   attachments: DailyReportAttachmentDto[];
+  weather?: string;
+  workersCount?: number;
+  workInProgress?: string;
+  delays?: string;
 }
 
 // ============================================================
@@ -1583,4 +1588,197 @@ export interface AssignmentHistoryFilterRequest {
   pageNumber?: number;
   pageSize?: number;
 }
+
+// ============================================================
+// DOC-01 & DOC-02 & DOC-03: Central Document Center
+// ============================================================
+export type DocumentCategory =
+  | 'TechnicalOffice'
+  | 'Accounting'
+  | 'Drawings'
+  | 'DailyReports'
+  | 'SiteDocuments'
+  | 'DataSheets'
+  | 'Software'
+  | 'Installation'
+  | 'Maintenance'
+  | 'Contracts'
+  | 'Procurement'
+  | 'Other';
+
+export interface CategoryCountDto {
+  category: DocumentCategory | number;
+  categoryName: string;
+  count: number;
+}
+
+export interface ProjectDocumentCenterDto {
+  projectId: string;
+  projectName: string;
+  categories: CategoryCountDto[];
+  documents: DocumentDto[];
+}
+
+export interface SiteDocumentCenterDto {
+  siteId: string;
+  siteName: string;
+  projectId: string;
+  projectName: string;
+  categories: CategoryCountDto[];
+  documents: DocumentDto[];
+}
+
+export interface UnifiedUploadDocumentRequest {
+  projectId: string;
+  siteId?: string;
+  category: DocumentCategory | number;
+  documentTypeId: string;
+  title: string;
+  description?: string;
+  fileName: string;
+  fileExtension?: string;
+  mimeType?: string;
+  fileSize: number;
+  storageKey: string;
+}
+
+// ============================================================
+// DRAW-01 & DRAW-02: Drawing Management & Drawing Viewer
+// ============================================================
+export type DrawingDiscipline =
+  | 'Architecture'
+  | 'Electrical'
+  | 'Mechanical'
+  | 'CCTV'
+  | 'AccessControl'
+  | 'Network'
+  | 'FireAlarm'
+  | 'Security'
+  | 'Civil'
+  | 'Other';
+
+export type DrawingType =
+  | 'ShopDrawing'
+  | 'AsBuilt'
+  | 'Schematic'
+  | 'SingleLineDiagram'
+  | 'Layout'
+  | 'Detail'
+  | 'Other';
+
+export type DrawingMarkupType =
+  | 'Pin'
+  | 'Rectangle'
+  | 'Circle'
+  | 'Arrow'
+  | 'Line'
+  | 'Text'
+  | 'Cloud'
+  | 'Comment';
+
+export interface DrawingMarkupDto {
+  id: string;
+  drawingId: string;
+  userId: string;
+  userName: string;
+  type: DrawingMarkupType;
+  positionJson: string;
+  text: string;
+  color?: string;
+  createdAt: string;
+}
+
+export interface CreateDrawingMarkupRequest {
+  type: DrawingMarkupType;
+  positionJson: string;
+  text: string;
+  color?: string;
+}
+
+export interface DrawingDto {
+  id: string;
+  projectId: string;
+  projectName: string;
+  siteId?: string;
+  siteName?: string;
+  documentId?: string;
+  drawingNumber: string;
+  drawingTitle: string;
+  discipline: DrawingDiscipline | number | string;
+  drawingType: DrawingType | number | string;
+  revision: string;
+  version: number;
+  status: string;
+  uploadedBy: string;
+  uploaderName: string;
+  uploadedAt: string;
+  approvedBy?: string;
+  approverName?: string;
+  approvedAt?: string;
+  storageKey: string;
+  fileName?: string;
+  fileExtension?: string;
+  fileSizeBytes: number;
+  markupsCount: number;
+  downloadUrl?: string;
+}
+
+export interface CreateDrawingRequest {
+  projectId: string;
+  siteId?: string;
+  drawingNumber: string;
+  drawingTitle: string;
+  discipline: DrawingDiscipline | number;
+  drawingType: DrawingType | number;
+  revision: string;
+  storageKey: string;
+  fileName?: string;
+  fileExtension?: string;
+  fileSizeBytes: number;
+}
+
+// ============================================================
+// DOC-06: MTI Data Sheets
+// ============================================================
+export interface ProductDataSheetDto {
+  id: string;
+  documentId?: string;
+  projectId?: string;
+  projectName?: string;
+  siteId?: string;
+  siteName?: string;
+  assetId?: string;
+  assetName?: string;
+  materialId?: string;
+  materialName?: string;
+  product: string;
+  manufacturer: string;
+  model: string;
+  partNumber?: string;
+  category: string;
+  version: number;
+  storageKey?: string;
+  fileName?: string;
+  fileSizeBytes: number;
+  uploadedBy: string;
+  uploaderName: string;
+  uploadedAt: string;
+  downloadUrl?: string;
+}
+
+export interface CreateProductDataSheetRequest {
+  projectId?: string;
+  siteId?: string;
+  assetId?: string;
+  materialId?: string;
+  product: string;
+  manufacturer: string;
+  model: string;
+  partNumber?: string;
+  category: string;
+  storageKey?: string;
+  fileName?: string;
+  fileSizeBytes: number;
+}
+
 

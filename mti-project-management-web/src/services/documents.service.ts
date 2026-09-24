@@ -1,7 +1,17 @@
 import { apiClient } from '@/lib/api-client';
 import { logger } from '@/lib/logger';
 import { mediaService } from '@/services/media.service';
-import { ApiResponse, DocumentDto, DocumentDetailDto, DocumentTypeDto, DocumentVersionDto } from '@/types';
+import {
+  ApiResponse,
+  DocumentDto,
+  DocumentDetailDto,
+  DocumentTypeDto,
+  DocumentVersionDto,
+  ProjectDocumentCenterDto,
+  SiteDocumentCenterDto,
+  UnifiedUploadDocumentRequest,
+  DocumentCategory
+} from '@/types';
 
 export interface CreateDocumentRequest {
   projectId: string;
@@ -10,6 +20,7 @@ export interface CreateDocumentRequest {
   title: string;
   description?: string;
   file: File;
+  category?: DocumentCategory | number | string;
 }
 
 export interface UploadVersionRequest {
@@ -33,6 +44,7 @@ export const documentsService = {
     siteId?: string;
     documentTypeId?: string;
     status?: string;
+    category?: DocumentCategory | string | number;
     search?: string;
   }): Promise<ApiResponse<DocumentDto[]>> {
     const query = new URLSearchParams();
@@ -40,6 +52,7 @@ export const documentsService = {
     if (params?.siteId) query.set('siteId', params.siteId);
     if (params?.documentTypeId) query.set('documentTypeId', params.documentTypeId);
     if (params?.status) query.set('status', params.status);
+    if (params?.category !== undefined) query.set('category', params.category.toString());
     if (params?.search) query.set('search', params.search);
 
     const qs = query.toString();
@@ -114,6 +127,7 @@ export const documentsService = {
       documentTypeId: data.documentTypeId,
       title: data.title,
       description: data.description || null,
+      category: data.category !== undefined ? data.category : 'Other',
     });
 
     if (!createRes.success || !createRes.data?.id) {
@@ -312,5 +326,39 @@ export const documentsService = {
   async deleteVersion(documentId: string, versionId: string, reason?: string): Promise<ApiResponse<any>> {
     const qs = reason ? `?reason=${encodeURIComponent(reason)}` : '';
     return apiClient.delete(`/api/documents/${documentId}/versions/${versionId}${qs}`);
+  },
+
+  async getCategories(): Promise<ApiResponse<{ id: number; code: string; nameEn: string; nameAr: string }[]>> {
+    return apiClient.get('/api/documents/categories');
+  },
+
+  async getProjectDocumentCenter(
+    projectId: string,
+    siteId?: string,
+    category?: DocumentCategory | string | number,
+    search?: string
+  ): Promise<ApiResponse<ProjectDocumentCenterDto>> {
+    const qs = new URLSearchParams();
+    if (siteId) qs.set('siteId', siteId);
+    if (category !== undefined) qs.set('category', category.toString());
+    if (search) qs.set('search', search);
+
+    return apiClient.get(`/api/documents/project/${projectId}/center${qs.toString() ? `?${qs.toString()}` : ''}`);
+  },
+
+  async getSiteDocumentCenter(
+    siteId: string,
+    category?: DocumentCategory | string | number,
+    search?: string
+  ): Promise<ApiResponse<SiteDocumentCenterDto>> {
+    const qs = new URLSearchParams();
+    if (category !== undefined) qs.set('category', category.toString());
+    if (search) qs.set('search', search);
+
+    return apiClient.get(`/api/documents/site/${siteId}/center${qs.toString() ? `?${qs.toString()}` : ''}`);
+  },
+
+  async unifiedUpload(payload: UnifiedUploadDocumentRequest): Promise<ApiResponse<DocumentDto>> {
+    return apiClient.post('/api/documents/unified-upload', payload);
   }
 };

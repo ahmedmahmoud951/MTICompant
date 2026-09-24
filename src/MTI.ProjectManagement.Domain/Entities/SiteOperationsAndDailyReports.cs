@@ -84,13 +84,17 @@ public class DailySiteReport : FullAuditedEntity
     public Team? Team { get; set; }
 
     public string Manpower { get; set; } = string.Empty;
+    public string? Weather { get; set; } // DOC-07
+    public int? WorkersCount { get; set; } // DOC-07
     public string WorkCompleted { get; set; } = string.Empty;
-    public string Problems { get; set; } = string.Empty;
+    public string? WorkInProgress { get; set; } // DOC-07
+    public string Problems { get; set; } = string.Empty; // Issues
+    public string? Delays { get; set; } // DOC-07
     public string MaterialsReceived { get; set; } = string.Empty;
     public string MaterialsUsed { get; set; } = string.Empty;
-    public string Equipment { get; set; } = string.Empty;
+    public string Equipment { get; set; } = string.Empty; // EquipmentUsed
     public string SafetyNotes { get; set; } = string.Empty;
-    public string TomorrowPlan { get; set; } = string.Empty;
+    public string TomorrowPlan { get; set; } = string.Empty; // NextDayPlan
 
     public DailyReportStatus Status { get; set; } = DailyReportStatus.Draft;
     public int RevisionNumber { get; set; } = 1;

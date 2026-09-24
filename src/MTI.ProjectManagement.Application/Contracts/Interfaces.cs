@@ -98,12 +98,15 @@ public interface IAppDbContext
     DbSet<MessageReceipt> MessageReceipts { get; }
     DbSet<WarrantyAlertLog> WarrantyAlertLogs { get; }
 
-    // Enterprise Documents
+    // Enterprise Documents & Drawings & DataSheets
     DbSet<Document> Documents { get; }
     DbSet<DocumentType> DocumentTypes { get; }
     DbSet<DocumentVersion> DocumentVersions { get; }
     DbSet<DocumentApproval> DocumentApprovals { get; }
     DbSet<DocumentCorrection> DocumentCorrections { get; }
+    DbSet<Drawing> Drawings { get; }
+    DbSet<DrawingMarkup> DrawingMarkups { get; }
+    DbSet<ProductDataSheet> ProductDataSheets { get; }
 
     // DB-I18N: Language infrastructure
     DbSet<SupportedLanguage> SupportedLanguages { get; }

@@ -21,4 +21,8 @@ export * from './operations/SiteOperationsManager';
 export * from './reports/DailySiteReportsManager';
 export * from './reports/ReportsAnalyticsHub';
 export * from './dashboard/MainDashboard';
+export * from './drawings/DrawingsWorkspace';
+export * from './drawings/DrawingViewer';
+export * from './documents/DataSheetsWorkspace';
+export * from './sites/SiteWorkspace';
 

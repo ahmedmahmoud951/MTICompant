@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -183,7 +183,11 @@ public class DailySiteReportsController : ControllerBase
             r.ApprovedAt,
             r.ApprovedByUser != null ? $"{r.ApprovedByUser.FirstName} {r.ApprovedByUser.LastName}" : null,
             r.ReviewNotes,
-            attachments
+            attachments,
+            r.Weather,
+            r.WorkersCount,
+            r.WorkInProgress,
+            r.Delays
         ));
     }
 
@@ -205,9 +209,13 @@ public class DailySiteReportsController : ControllerBase
             ReportDate = request.ReportDate,
             EngineerUserId = userId,
             TeamId = request.TeamId,
+            Weather = request.Weather?.Trim(),
+            WorkersCount = request.WorkersCount,
             Manpower = request.Manpower.Trim(),
             WorkCompleted = request.WorkCompleted.Trim(),
+            WorkInProgress = request.WorkInProgress?.Trim(),
             Problems = request.Problems.Trim(),
+            Delays = request.Delays?.Trim(),
             MaterialsReceived = request.MaterialsReceived.Trim(),
             MaterialsUsed = request.MaterialsUsed.Trim(),
             Equipment = request.Equipment.Trim(),
@@ -290,9 +298,13 @@ public class DailySiteReportsController : ControllerBase
 
         report.ReportDate = request.ReportDate;
         report.TeamId = request.TeamId;
+        report.Weather = request.Weather?.Trim();
+        report.WorkersCount = request.WorkersCount;
         report.Manpower = request.Manpower.Trim();
         report.WorkCompleted = request.WorkCompleted.Trim();
+        report.WorkInProgress = request.WorkInProgress?.Trim();
         report.Problems = request.Problems.Trim();
+        report.Delays = request.Delays?.Trim();
         report.MaterialsReceived = request.MaterialsReceived.Trim();
         report.MaterialsUsed = request.MaterialsUsed.Trim();
         report.Equipment = request.Equipment.Trim();
@@ -387,9 +399,13 @@ public class DailySiteReportsController : ControllerBase
             ReportDate = parentReport.ReportDate,
             EngineerUserId = userId,
             TeamId = parentReport.TeamId,
+            Weather = request.Weather?.Trim(),
+            WorkersCount = request.WorkersCount,
             Manpower = request.Manpower.Trim(),
             WorkCompleted = request.WorkCompleted.Trim(),
+            WorkInProgress = request.WorkInProgress?.Trim(),
             Problems = request.Problems.Trim(),
+            Delays = request.Delays?.Trim(),
             MaterialsReceived = request.MaterialsReceived.Trim(),
             MaterialsUsed = request.MaterialsUsed.Trim(),
             Equipment = request.Equipment.Trim(),

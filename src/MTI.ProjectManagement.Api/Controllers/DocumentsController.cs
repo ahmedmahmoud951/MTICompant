@@ -77,6 +77,7 @@ public class DocumentsController : ControllerBase
         [FromQuery] Guid? siteId,
         [FromQuery] Guid? typeId,
         [FromQuery] DocumentStatus? status,
+        [FromQuery] DocumentCategory? category,
         [FromQuery] string? search)
     {
         var userId = _currentUserService.UserId;
@@ -95,6 +96,26 @@ public class DocumentsController : ControllerBase
                 .ThenInclude(v => v!.File)
             .Include(d => d.Versions)
             .Where(d => authorizedProjectIds.Contains(d.ProjectId));
+
+        var isAdminUser = _currentUserService.IsAdmin || _currentUserService.IsSystemAdmin;
+        var hasAccountingAccess = isAdminUser ||
+                                  _currentUserService.Permissions.Contains("Accounting.View") ||
+                                  _currentUserService.Permissions.Contains("Documents.Accounting.View");
+
+        if (category == DocumentCategory.Accounting && !hasAccountingAccess)
+        {
+            return Forbid();
+        }
+
+        if (!hasAccountingAccess)
+        {
+            query = query.Where(d => d.Category != DocumentCategory.Accounting);
+        }
+
+        if (category.HasValue)
+        {
+            query = query.Where(d => d.Category == category.Value);
+        }
 
         if (projectId.HasValue)
         {
@@ -129,7 +150,6 @@ public class DocumentsController : ControllerBase
             .OrderByDescending(d => d.CreatedAt)
             .ToListAsync();
 
-        var isAdminUser = _currentUserService.IsAdmin || _currentUserService.IsSystemAdmin;
         var dtos = docs.Select(d =>
         {
             var isSealed = d.LockedAt.HasValue
@@ -171,7 +191,8 @@ public class DocumentsController : ControllerBase
                 d.ApproverUser?.FullName,
                 d.CreatedAt,
                 d.UpdatedAt,
-                d.Versions.Count
+                d.Versions.Count,
+                d.Category
             );
         }).ToList();
 
@@ -348,6 +369,7 @@ public class DocumentsController : ControllerBase
             ProjectId = request.ProjectId,
             SiteId = request.SiteId,
             DocumentTypeId = request.DocumentTypeId,
+            Category = request.Category,
             Title = request.Title.Trim(),
             Description = request.Description?.Trim(),
             OwnerUserId = userId.Value,
@@ -363,7 +385,8 @@ public class DocumentsController : ControllerBase
         {
             document.DocumentNumber,
             document.Title,
-            document.ProjectId
+            document.ProjectId,
+            Category = document.Category.ToString()
         });
 
         return CreatedAtAction(nameof(GetDocumentById), new { id = document.Id },
@@ -397,8 +420,9 @@ public class DocumentsController : ControllerBase
                 null,
                 document.CreatedAt,
                 null,
-                0
-            ), "ØªÙ… Ø¥Ù†Ø´Ø§Ø¡ Ø§Ù„Ù…Ø³ØªÙ†Ø¯ Ø¨Ù†Ø¬Ø§Ø­"));
+                0,
+                document.Category
+            ), "تم إنشاء المستند بنجاح"));
     }
 
     // ==========================================
@@ -1003,11 +1027,359 @@ public class DocumentsController : ControllerBase
             null,
             document.CreatedAt,
             document.UpdatedAt,
-            document.Versions.Count
+            document.Versions.Count,
+            document.Category
         );
 
         return Ok(ApiResponse<DocumentDto>.SuccessResult(dto, "تم تحديث بيانات المستند بنجاح"));
     }
+
+    // ==========================================
+    // DOC-01: Document Categories Catalog
+    // ==========================================
+
+    [HttpGet("categories")]
+    public ActionResult<ApiResponse<List<object>>> GetCategories()
+    {
+        var categories = Enum.GetValues<DocumentCategory>().Select(c => new
+        {
+            Id = (int)c,
+            Code = c.ToString(),
+            NameEn = c.ToString(),
+            NameAr = GetCategoryArabicName(c)
+        }).ToList();
+
+        return Ok(ApiResponse<List<object>>.SuccessResult(categories.Cast<object>().ToList()));
+    }
+
+    // ==========================================
+    // DOC-02: Project Document Center
+    // ==========================================
+
+    [HttpGet("project/{projectId:guid}/center")]
+    public async Task<ActionResult<ApiResponse<ProjectDocumentCenterDto>>> GetProjectDocumentCenter(
+        Guid projectId,
+        [FromQuery] Guid? siteId = null,
+        [FromQuery] DocumentCategory? category = null,
+        [FromQuery] string? search = null)
+    {
+        var userId = _currentUserService.UserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var authorizedProjectIds = await _resourceAuthorizationService.GetAuthorizedProjectIdsAsync(userId.Value);
+        var isAdmin = _currentUserService.IsAdmin || _currentUserService.IsSystemAdmin;
+        if (!isAdmin && !authorizedProjectIds.Contains(projectId)) return Forbid();
+
+        var project = await _context.Projects.FindAsync(projectId);
+        if (project == null) return NotFound(ApiResponse<ProjectDocumentCenterDto>.ErrorResult("المشروع غير موجود"));
+
+        var baseQuery = _context.Documents
+            .Where(d => d.ProjectId == projectId);
+
+        if (siteId.HasValue)
+        {
+            baseQuery = baseQuery.Where(d => d.SiteId == siteId.Value);
+        }
+
+        var hasAccountingAccess = isAdmin ||
+                                  _currentUserService.Permissions.Contains("Accounting.View") ||
+                                  _currentUserService.Permissions.Contains("Documents.Accounting.View");
+        if (!hasAccountingAccess)
+        {
+            baseQuery = baseQuery.Where(d => d.Category != DocumentCategory.Accounting);
+        }
+
+        var categoryCounts = await baseQuery
+            .GroupBy(d => d.Category)
+            .Select(g => new { Category = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        var allCategories = Enum.GetValues<DocumentCategory>().Select(cat =>
+        {
+            var match = categoryCounts.FirstOrDefault(c => c.Category == cat);
+            return new CategoryCountDto(cat, GetCategoryArabicName(cat), match?.Count ?? 0);
+        }).ToList();
+
+        var listQuery = baseQuery
+            .Include(d => d.Site)
+            .Include(d => d.DocumentType)
+            .Include(d => d.OwnerUser)
+            .Include(d => d.UploaderUser)
+            .Include(d => d.ApproverUser)
+            .Include(d => d.CurrentVersion).ThenInclude(v => v!.File)
+            .Include(d => d.Versions)
+            .AsQueryable();
+
+        if (category.HasValue)
+        {
+            listQuery = listQuery.Where(d => d.Category == category.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim().ToLower();
+            listQuery = listQuery.Where(d => d.Title.ToLower().Contains(s) ||
+                                             d.DocumentNumber.ToLower().Contains(s) ||
+                                             (d.Description != null && d.Description.ToLower().Contains(s)));
+        }
+
+        var docs = await listQuery.OrderByDescending(d => d.CreatedAt).ToListAsync();
+        var dtos = docs.Select(d => new DocumentDto(
+            d.Id,
+            d.DocumentNumber,
+            d.ProjectId,
+            project.Name,
+            d.SiteId,
+            d.Site?.Name,
+            d.DocumentTypeId,
+            d.DocumentType.Code,
+            d.DocumentType.NameAr,
+            d.DocumentType.NameEn,
+            d.Title,
+            d.Description,
+            d.OwnerUserId,
+            d.OwnerUser.FullName,
+            d.UploadedBy,
+            d.UploaderUser.FullName,
+            d.Status,
+            d.CurrentVersionId,
+            d.CurrentVersion?.VersionNumber ?? (d.VersionNumber > 0 ? d.VersionNumber : 0),
+            d.CurrentVersion?.File?.OriginalFileName ?? d.FileName,
+            d.CurrentVersion?.File?.FileSize ?? d.FileSize,
+            d.EditableUntil,
+            d.IsLocked,
+            isAdmin || (d.UploadedBy == userId.Value && !d.IsLocked),
+            d.ApprovedAt,
+            d.ApprovedBy,
+            d.ApproverUser?.FullName,
+            d.CreatedAt,
+            d.UpdatedAt,
+            d.Versions.Count > 0 ? d.Versions.Count : 1,
+            d.Category
+        )).ToList();
+
+        return Ok(ApiResponse<ProjectDocumentCenterDto>.SuccessResult(new ProjectDocumentCenterDto(
+            projectId,
+            project.Name,
+            allCategories,
+            dtos
+        )));
+    }
+
+    // ==========================================
+    // DOC-03: Site Document Center
+    // ==========================================
+
+    [HttpGet("site/{siteId:guid}/center")]
+    public async Task<ActionResult<ApiResponse<SiteDocumentCenterDto>>> GetSiteDocumentCenter(
+        Guid siteId,
+        [FromQuery] DocumentCategory? category = null,
+        [FromQuery] string? search = null)
+    {
+        var userId = _currentUserService.UserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var site = await _context.Sites.Include(s => s.Project).FirstOrDefaultAsync(s => s.Id == siteId);
+        if (site == null) return NotFound(ApiResponse<SiteDocumentCenterDto>.ErrorResult("الموقع غير موجود"));
+
+        var authorizedProjectIds = await _resourceAuthorizationService.GetAuthorizedProjectIdsAsync(userId.Value);
+        var isAdmin = _currentUserService.IsAdmin || _currentUserService.IsSystemAdmin;
+        if (!isAdmin && !authorizedProjectIds.Contains(site.ProjectId)) return Forbid();
+
+        var baseQuery = _context.Documents.Where(d => d.SiteId == siteId);
+
+        var hasAccountingAccess = isAdmin ||
+                                  _currentUserService.Permissions.Contains("Accounting.View") ||
+                                  _currentUserService.Permissions.Contains("Documents.Accounting.View");
+        if (!hasAccountingAccess)
+        {
+            baseQuery = baseQuery.Where(d => d.Category != DocumentCategory.Accounting);
+        }
+
+        var categoryCounts = await baseQuery
+            .GroupBy(d => d.Category)
+            .Select(g => new { Category = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        var allCategories = Enum.GetValues<DocumentCategory>().Select(cat =>
+        {
+            var match = categoryCounts.FirstOrDefault(c => c.Category == cat);
+            return new CategoryCountDto(cat, GetCategoryArabicName(cat), match?.Count ?? 0);
+        }).ToList();
+
+        var listQuery = baseQuery
+            .Include(d => d.DocumentType)
+            .Include(d => d.OwnerUser)
+            .Include(d => d.UploaderUser)
+            .Include(d => d.ApproverUser)
+            .Include(d => d.CurrentVersion).ThenInclude(v => v!.File)
+            .Include(d => d.Versions)
+            .AsQueryable();
+
+        if (category.HasValue)
+        {
+            listQuery = listQuery.Where(d => d.Category == category.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim().ToLower();
+            listQuery = listQuery.Where(d => d.Title.ToLower().Contains(s) ||
+                                             d.DocumentNumber.ToLower().Contains(s) ||
+                                             (d.Description != null && d.Description.ToLower().Contains(s)));
+        }
+
+        var docs = await listQuery.OrderByDescending(d => d.CreatedAt).ToListAsync();
+        var dtos = docs.Select(d => new DocumentDto(
+            d.Id,
+            d.DocumentNumber,
+            d.ProjectId,
+            site.Project.Name,
+            d.SiteId,
+            site.Name,
+            d.DocumentTypeId,
+            d.DocumentType.Code,
+            d.DocumentType.NameAr,
+            d.DocumentType.NameEn,
+            d.Title,
+            d.Description,
+            d.OwnerUserId,
+            d.OwnerUser.FullName,
+            d.UploadedBy,
+            d.UploaderUser.FullName,
+            d.Status,
+            d.CurrentVersionId,
+            d.CurrentVersion?.VersionNumber ?? (d.VersionNumber > 0 ? d.VersionNumber : 0),
+            d.CurrentVersion?.File?.OriginalFileName ?? d.FileName,
+            d.CurrentVersion?.File?.FileSize ?? d.FileSize,
+            d.EditableUntil,
+            d.IsLocked,
+            isAdmin || (d.UploadedBy == userId.Value && !d.IsLocked),
+            d.ApprovedAt,
+            d.ApprovedBy,
+            d.ApproverUser?.FullName,
+            d.CreatedAt,
+            d.UpdatedAt,
+            d.Versions.Count > 0 ? d.Versions.Count : 1,
+            d.Category
+        )).ToList();
+
+        return Ok(ApiResponse<SiteDocumentCenterDto>.SuccessResult(new SiteDocumentCenterDto(
+            siteId,
+            site.Name,
+            site.ProjectId,
+            site.Project.Name,
+            allCategories,
+            dtos
+        )));
+    }
+
+    // ==========================================
+    // Unified Direct Upload
+    // ==========================================
+
+    [HttpPost("unified-upload")]
+    public async Task<ActionResult<ApiResponse<DocumentDto>>> UnifiedUpload(
+        [FromBody] UnifiedUploadDocumentRequest request)
+    {
+        var userId = _currentUserService.UserId;
+        if (!userId.HasValue) return Unauthorized();
+
+        var canAccess = await _resourceAuthorizationService.CanAccessProjectAsync(userId.Value, request.ProjectId);
+        if (!canAccess && !_currentUserService.IsAdmin && !_currentUserService.IsSystemAdmin) return Forbid();
+
+        var docType = await _context.DocumentTypes.FindAsync(request.DocumentTypeId);
+        if (docType == null) return BadRequest(ApiResponse<DocumentDto>.ErrorResult("نوع المستند غير صالح"));
+
+        var project = await _context.Projects.FindAsync(request.ProjectId);
+        if (project == null) return BadRequest(ApiResponse<DocumentDto>.ErrorResult("المشروع غير موجود"));
+
+        var count = await _context.Documents.CountAsync(d => d.ProjectId == request.ProjectId);
+        var docNumber = $"DOC-{project.Code}-{docType.Code}-{count + 1:D3}";
+
+        var document = new Document
+        {
+            DocumentNumber = docNumber,
+            ProjectId = request.ProjectId,
+            SiteId = request.SiteId,
+            DocumentTypeId = request.DocumentTypeId,
+            Category = request.Category,
+            Title = request.Title.Trim(),
+            Description = request.Description?.Trim(),
+            FileName = request.FileName.Trim(),
+            FileExtension = request.FileExtension ?? Path.GetExtension(request.FileName),
+            MimeType = request.MimeType ?? "application/octet-stream",
+            FileSize = request.FileSize,
+            StorageKey = request.StorageKey,
+            VersionNumber = 1,
+            OwnerUserId = userId.Value,
+            UploadedBy = userId.Value,
+            Status = DocumentStatus.Draft,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        _context.Documents.Add(document);
+        await _context.SaveChangesAsync();
+
+        await _auditService.LogAsync("UnifiedUploadDocument", "Document", document.Id.ToString(), null, new
+        {
+            document.DocumentNumber,
+            document.Title,
+            Category = document.Category.ToString(),
+            document.StorageKey
+        });
+
+        return CreatedAtAction(nameof(GetDocumentById), new { id = document.Id },
+            ApiResponse<DocumentDto>.SuccessResult(new DocumentDto(
+                document.Id,
+                document.DocumentNumber,
+                document.ProjectId,
+                project.Name,
+                document.SiteId,
+                null,
+                document.DocumentTypeId,
+                docType.Code,
+                docType.NameAr,
+                docType.NameEn,
+                document.Title,
+                document.Description,
+                document.OwnerUserId,
+                _currentUserService.Email ?? "User",
+                document.UploadedBy,
+                _currentUserService.Email ?? "User",
+                document.Status,
+                null,
+                1,
+                document.FileName,
+                document.FileSize,
+                null,
+                false,
+                true,
+                null,
+                null,
+                null,
+                document.CreatedAt,
+                null,
+                1,
+                document.Category
+            ), "تم حفظ المستند بنجاح"));
+    }
+
+    private static string GetCategoryArabicName(DocumentCategory cat) => cat switch
+    {
+        DocumentCategory.TechnicalOffice => "المكتب الفني",
+        DocumentCategory.Accounting => "الحسابات والمالية",
+        DocumentCategory.Drawings => "المخططات الهندسية",
+        DocumentCategory.DailyReports => "التقارير اليومية",
+        DocumentCategory.SiteDocuments => "مستندات الموقع",
+        DocumentCategory.DataSheets => "لوائح البيانات الفنية",
+        DocumentCategory.Software => "البرمجيات والأنظمة",
+        DocumentCategory.Installation => "أعمال التركيب",
+        DocumentCategory.Maintenance => "أعمال الصيانة",
+        DocumentCategory.Contracts => "العقود والاتفاقيات",
+        DocumentCategory.Procurement => "المشتريات والتوريدات",
+        _ => "أخرى"
+    };
 }
 
 public class UpdateDocumentRequest

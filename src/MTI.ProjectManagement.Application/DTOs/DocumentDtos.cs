@@ -41,8 +41,10 @@ public record DocumentDto(
     string? ApproverName,
     DateTime CreatedAt,
     DateTime? UpdatedAt,
-    int VersionsCount
+    int VersionsCount,
+    DocumentCategory Category = DocumentCategory.Other
 );
+
 
 public record DocumentDetailDto(
     DocumentDto Document,
@@ -105,7 +107,8 @@ public record CreateDocumentRequest(
     Guid? SiteId,
     Guid DocumentTypeId,
     string Title,
-    string? Description
+    string? Description,
+    DocumentCategory Category = DocumentCategory.Other
 );
 
 public record ReviewDocumentRequest(
@@ -127,3 +130,199 @@ public record DocumentUploadIntentResponse(
     string UploadUrl,
     DateTime ExpiresAt
 );
+
+// ==========================================
+// DOC-01 & DOC-02 & DOC-03: Central Document Center DTOs
+// ==========================================
+public record DocumentFilterRequest(
+    Guid? ProjectId = null,
+    Guid? SiteId = null,
+    DocumentCategory? Category = null,
+    Guid? DocumentTypeId = null,
+    DocumentStatus? Status = null,
+    string? Search = null,
+    int Page = 1,
+    int PageSize = 50
+)
+{
+    public DocumentFilterRequest() : this(null, null, null, null, null, null, 1, 50) { }
+}
+
+public record UnifiedUploadDocumentRequest(
+    Guid ProjectId,
+    Guid? SiteId,
+    DocumentCategory Category,
+    Guid DocumentTypeId,
+    string Title,
+    string? Description,
+    string FileName,
+    string? FileExtension,
+    string? MimeType,
+    long FileSize,
+    string StorageKey
+);
+
+public record CategoryCountDto(
+    DocumentCategory Category,
+    string CategoryName,
+    int Count
+);
+
+public record ProjectDocumentCenterDto(
+    Guid ProjectId,
+    string ProjectName,
+    List<CategoryCountDto> Categories,
+    List<DocumentDto> Documents
+);
+
+public record SiteDocumentCenterDto(
+    Guid SiteId,
+    string SiteName,
+    Guid ProjectId,
+    string ProjectName,
+    List<CategoryCountDto> Categories,
+    List<DocumentDto> Documents
+);
+
+// ==========================================
+// DRAW-01: Drawings DTOs
+// ==========================================
+public record DrawingDto(
+    Guid Id,
+    Guid ProjectId,
+    string ProjectName,
+    Guid? SiteId,
+    string? SiteName,
+    Guid? DocumentId,
+    string DrawingNumber,
+    string DrawingTitle,
+    DrawingDiscipline Discipline,
+    DrawingType DrawingType,
+    string Revision,
+    int Version,
+    DocumentStatus Status,
+    Guid UploadedBy,
+    string UploaderName,
+    DateTime UploadedAt,
+    Guid? ApprovedBy,
+    string? ApproverName,
+    DateTime? ApprovedAt,
+    string StorageKey,
+    string? FileName,
+    string? FileExtension,
+    long FileSizeBytes,
+    int MarkupsCount,
+    string? DownloadUrl
+);
+
+public record CreateDrawingRequest(
+    Guid ProjectId,
+    Guid? SiteId,
+    string DrawingNumber,
+    string DrawingTitle,
+    DrawingDiscipline Discipline,
+    DrawingType DrawingType,
+    string Revision,
+    string StorageKey,
+    string? FileName,
+    string? FileExtension,
+    long FileSizeBytes
+);
+
+public record UpdateDrawingStatusRequest(
+    DocumentStatus Status,
+    string? Reason = null
+);
+
+public record DrawingFilterRequest(
+    Guid? ProjectId = null,
+    Guid? SiteId = null,
+    DrawingDiscipline? Discipline = null,
+    DrawingType? DrawingType = null,
+    DocumentStatus? Status = null,
+    string? Search = null,
+    int Page = 1,
+    int PageSize = 50
+)
+{
+    public DrawingFilterRequest() : this(null, null, null, null, null, null, 1, 50) { }
+}
+
+// ==========================================
+// DRAW-02: Drawing Markup DTOs
+// ==========================================
+public record DrawingMarkupDto(
+    Guid Id,
+    Guid DrawingId,
+    Guid UserId,
+    string UserName,
+    DrawingMarkupType Type,
+    string PositionJson,
+    string Text,
+    string? Color,
+    DateTime CreatedAt
+);
+
+public record CreateDrawingMarkupRequest(
+    DrawingMarkupType Type,
+    string PositionJson,
+    string Text,
+    string? Color = "#ef4444"
+);
+
+// ==========================================
+// DOC-06: MTI Data Sheets DTOs
+// ==========================================
+public record ProductDataSheetDto(
+    Guid Id,
+    Guid? DocumentId,
+    Guid? ProjectId,
+    string? ProjectName,
+    Guid? SiteId,
+    string? SiteName,
+    Guid? AssetId,
+    string? AssetName,
+    Guid? MaterialId,
+    string? MaterialName,
+    string Product,
+    string Manufacturer,
+    string Model,
+    string? PartNumber,
+    string Category,
+    int Version,
+    string? StorageKey,
+    string? FileName,
+    long FileSizeBytes,
+    Guid UploadedBy,
+    string UploaderName,
+    DateTime UploadedAt,
+    string? DownloadUrl
+);
+
+public record CreateProductDataSheetRequest(
+    Guid? ProjectId,
+    Guid? SiteId,
+    Guid? AssetId,
+    Guid? MaterialId,
+    string Product,
+    string Manufacturer,
+    string Model,
+    string? PartNumber,
+    string Category,
+    string? StorageKey,
+    string? FileName,
+    long FileSizeBytes
+);
+
+public record ProductDataSheetFilterRequest(
+    Guid? ProjectId = null,
+    Guid? SiteId = null,
+    string? Category = null,
+    string? Search = null,
+    int Page = 1,
+    int PageSize = 50
+)
+{
+    public ProductDataSheetFilterRequest() : this(null, null, null, null, 1, 50) { }
+}
+

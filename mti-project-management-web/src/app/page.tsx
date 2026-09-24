@@ -47,9 +47,14 @@ import {
   SiteOperationsManager,
   DailySiteReportsManager,
   ReportsAnalyticsHub,
-  MainDashboard
+  MainDashboard,
+  DrawingsWorkspace,
+  DataSheetsWorkspace,
+  SiteWorkspace
 } from '@/features';
 import {
+  Compass,
+  Cpu,
   ShieldCheck,
   Radio,
   LogOut,
@@ -147,6 +152,7 @@ export default function Home() {
   const [allSites, setAllSites] = useState<Site[]>([]);
   const [loadingAllSites, setLoadingAllSites] = useState(false);
   const [loadingSites, setLoadingSites] = useState(false);
+  const [activeWorkspaceSite, setActiveWorkspaceSite] = useState<Site | null>(null);
 
   // Tasks
   const [tasks, setTasks] = useState<TaskItem[]>([]);
@@ -2678,6 +2684,8 @@ export default function Home() {
     { id: 'projects', label: t('navProjects'), icon: FolderKanban },
     { id: 'milestones', label: t('navMilestones'), icon: Layers },
     { id: 'documents', label: t('navDocuments'), icon: FileText },
+    { id: 'drawings', label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings', icon: Compass },
+    { id: 'datasheets', label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets', icon: Cpu },
     { id: 'operations', label: t('navSiteOperations'), icon: Wrench },
     { id: 'daily-reports', label: t('navDailyReports'), icon: FileSpreadsheet },
     { id: 'accounting', label: t('navAccounting'), icon: DollarSign },
@@ -2703,6 +2711,8 @@ export default function Home() {
     { id: 'my-projects', label: t('navMyProjects'), icon: FolderKanban },
     { id: 'milestones', label: t('navMilestones'), icon: Layers },
     { id: 'documents', label: t('navDocuments'), icon: FileText },
+    { id: 'drawings', label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings', icon: Compass },
+    { id: 'datasheets', label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets', icon: Cpu },
     { id: 'operations', label: t('navSiteOperations'), icon: Wrench },
     { id: 'daily-reports', label: t('navDailyReports'), icon: FileSpreadsheet },
     { id: 'my-sites', label: t('navMySites'), icon: MapPin },
@@ -2720,6 +2730,8 @@ export default function Home() {
     { id: 'my-projects', label: t('navMyProjects'), icon: FolderKanban },
     { id: 'milestones', label: t('navMilestones'), icon: Layers },
     { id: 'documents', label: t('navDocuments'), icon: FileText },
+    { id: 'drawings', label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings', icon: Compass },
+    { id: 'datasheets', label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets', icon: Cpu },
     { id: 'operations', label: t('navSiteOperations'), icon: Wrench },
     { id: 'daily-reports', label: t('navDailyReports'), icon: FileSpreadsheet },
     { id: 'technical-office', label: t('navTechnicalOffice'), icon: Briefcase },
@@ -3562,6 +3574,16 @@ export default function Home() {
               {/* VIEW: SITES (standalone page) */}
               {/* ======================================================== */}
               {(activeTab === 'sites' || activeTab === 'my-sites') && (
+                activeWorkspaceSite ? (
+                  <SiteWorkspace
+                    site={activeWorkspaceSite}
+                    project={projects.find((p) => p.id === activeWorkspaceSite.projectId)}
+                    allProjects={projects}
+                    currentUser={currentUser}
+                    lang={lang}
+                    onBack={() => setActiveWorkspaceSite(null)}
+                  />
+                ) : (
                 <div className="space-y-4">
                   <div className="glow-card p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
@@ -3628,55 +3650,70 @@ export default function Home() {
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {allSites.map((site) => (
-                        <div key={site.id} className="glow-card p-4 rounded-xl space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
-                              {site.code}
-                            </span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-700/45 text-slate-300">
-                              {translateStatusLabel(site.status)}
-                            </span>
-                          </div>
-                          <div className="font-semibold text-slate-100 text-sm">{site.name}</div>
-                          <div className="text-xs text-slate-400">
-                            {lang === 'ar' ? 'المشروع' : 'Project'}:{' '}
-                            <span className="text-slate-200">{site.projectName || '—'}</span>
-                          </div>
-                          {site.description && (
-                            <p className="text-xs text-slate-400 line-clamp-2">{site.description}</p>
-                          )}
-                          <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                            <MapPin className="w-3 h-3" />
-                            <span>{site.address || (lang === 'ar' ? 'بدون عنوان' : 'No address')}</span>
-                          </div>
-                          {isAdmin && (
-                            <div className="pt-2 flex items-center gap-2 border-t border-slate-600/40">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedProjectId(site.projectId);
-                                  openEditSite(site);
-                                }}
-                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-cyan-500/20 text-cyan-200 text-[11px] font-semibold"
-                              >
-                                <Pencil className="w-3 h-3" />
-                                {lang === 'ar' ? 'تعديل' : 'Edit'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => promptDeleteSite(site)}
-                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-[11px] font-semibold"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                {lang === 'ar' ? 'حذف' : 'Delete'}
-                              </button>
+                        <div key={site.id} className="glow-card p-4 rounded-xl space-y-3 hover:border-cyan-500/30 transition-all flex flex-col justify-between">
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400">
+                                {site.code}
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-700/45 text-slate-300">
+                                {translateStatusLabel(site.status)}
+                              </span>
                             </div>
-                          )}
+                            <div className="font-semibold text-slate-100 text-sm">{site.name}</div>
+                            <div className="text-xs text-slate-400">
+                              {lang === 'ar' ? 'المشروع' : 'Project'}:{' '}
+                              <span className="text-slate-200">{site.projectName || '—'}</span>
+                            </div>
+                            {site.description && (
+                              <p className="text-xs text-slate-400 line-clamp-2">{site.description}</p>
+                            )}
+                            <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />
+                              <span className="truncate">{site.address || (lang === 'ar' ? 'بدون عنوان' : 'No address')}</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2 border-t border-slate-700/50 space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => setActiveWorkspaceSite(site)}
+                              className="w-full py-1.5 px-3 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-400/30 text-cyan-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                            >
+                              <Layers className="w-3.5 h-3.5" />
+                              {lang === 'ar' ? 'دخول مساحة الموقع (12 قسم)' : 'Open Site Workspace (12 Tabs)'}
+                            </button>
+
+                            {isAdmin && (
+                              <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-800">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedProjectId(site.projectId);
+                                    openEditSite(site);
+                                  }}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-200 text-[11px] font-semibold"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  {lang === 'ar' ? 'تعديل' : 'Edit'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => promptDeleteSite(site)}
+                                  className="flex items-center gap-1 px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 text-[11px] font-semibold"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  {lang === 'ar' ? 'حذف' : 'Delete'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
                   )}
                 </div>
+                )
               )}
 
               {/* ======================================================== */}
@@ -6414,6 +6451,28 @@ export default function Home() {
                     currentUser={currentUser}
                     projects={projects}
                     lang={lang}
+                  />
+                </div>
+              )}
+
+              {/* ======================================================== */}
+              {/* VIEW: DRAWING MANAGEMENT & VIEWER (DRAW-01 & DRAW-02) */}
+              {/* ======================================================== */}
+              {activeTab === 'drawings' && (
+                <div className="h-[calc(100vh-8rem)] rounded-2xl overflow-hidden border border-slate-800 animate-fade-up">
+                  <DrawingsWorkspace
+                    initialProjectId={selectedProjectId || undefined}
+                  />
+                </div>
+              )}
+
+              {/* ======================================================== */}
+              {/* VIEW: DATA SHEETS CENTER (DOC-06) */}
+              {/* ======================================================== */}
+              {activeTab === 'datasheets' && (
+                <div className="h-[calc(100vh-8rem)] rounded-2xl overflow-hidden border border-slate-800 animate-fade-up">
+                  <DataSheetsWorkspace
+                    initialProjectId={selectedProjectId || undefined}
                   />
                 </div>
               )}

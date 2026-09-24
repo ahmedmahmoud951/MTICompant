@@ -12,9 +12,13 @@ export interface CreateDailyReportPayload {
   siteId: string;
   reportDate: string;
   teamId?: string;
+  weather?: string;
+  workersCount?: number;
   manpower: string;
   workCompleted: string;
+  workInProgress?: string;
   problems: string;
+  delays?: string;
   materialsReceived: string;
   materialsUsed: string;
   equipment: string;
@@ -29,9 +33,13 @@ export interface ReviewDailyReportPayload {
 }
 
 export interface CreateReportRevisionPayload {
+  weather?: string;
+  workersCount?: number;
   manpower: string;
   workCompleted: string;
+  workInProgress?: string;
   problems: string;
+  delays?: string;
   materialsReceived: string;
   materialsUsed: string;
   equipment: string;

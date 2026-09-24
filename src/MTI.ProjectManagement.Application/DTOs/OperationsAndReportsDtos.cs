@@ -132,7 +132,11 @@ public record DailySiteReportDetailDto(
     DateTime? ApprovedAt,
     string? ApprovedByUserName,
     string? ReviewNotes,
-    List<DailyReportAttachmentDto> Attachments
+    List<DailyReportAttachmentDto> Attachments,
+    string? Weather = null,
+    int? WorkersCount = null,
+    string? WorkInProgress = null,
+    string? Delays = null
 );
 
 public record DailyReportAttachmentDto(
@@ -152,13 +156,17 @@ public record CreateDailyReportRequest(
     DateTime ReportDate,
     Guid? TeamId,
     string Manpower,
-    string WorkCompleted,
-    string Problems,
-    string MaterialsReceived,
-    string MaterialsUsed,
-    string Equipment,
-    string SafetyNotes,
-    string TomorrowPlan,
+    string? Weather = null,
+    int? WorkersCount = null,
+    string WorkCompleted = "",
+    string? WorkInProgress = null,
+    string Problems = "",
+    string? Delays = null,
+    string MaterialsReceived = "",
+    string MaterialsUsed = "",
+    string Equipment = "",
+    string SafetyNotes = "",
+    string TomorrowPlan = "",
     List<Guid>? MediaFileIds = null
 );
 
@@ -169,12 +177,16 @@ public record ReviewDailyReportRequest(
 
 public record CreateReportRevisionRequest(
     string Manpower,
-    string WorkCompleted,
-    string Problems,
-    string MaterialsReceived,
-    string MaterialsUsed,
-    string Equipment,
-    string SafetyNotes,
-    string TomorrowPlan,
+    string? Weather = null,
+    int? WorkersCount = null,
+    string WorkCompleted = "",
+    string? WorkInProgress = null,
+    string Problems = "",
+    string? Delays = null,
+    string MaterialsReceived = "",
+    string MaterialsUsed = "",
+    string Equipment = "",
+    string SafetyNotes = "",
+    string TomorrowPlan = "",
     List<Guid>? MediaFileIds = null
 );

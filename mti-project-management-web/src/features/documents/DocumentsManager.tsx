@@ -44,11 +44,28 @@ interface DocumentsManagerProps {
   lang: Language;
 }
 
+const DOCUMENT_CATEGORIES = [
+  { key: 'All', labelAr: 'الكل', labelEn: 'All Documents' },
+  { key: 'TechnicalOffice', labelAr: 'المكتب الفني', labelEn: 'Technical Office' },
+  { key: 'Accounting', labelAr: 'الحسابات والمالية', labelEn: 'Accounting' },
+  { key: 'Drawings', labelAr: 'المخططات الهندسية', labelEn: 'Drawings' },
+  { key: 'DailyReports', labelAr: 'التقارير اليومية', labelEn: 'Daily Reports' },
+  { key: 'SiteDocuments', labelAr: 'مستندات الموقع', labelEn: 'Site Documents' },
+  { key: 'DataSheets', labelAr: 'لوائح البيانات الفنية', labelEn: 'Data Sheets' },
+  { key: 'Software', labelAr: 'البرمجيات والأنظمة', labelEn: 'Software' },
+  { key: 'Installation', labelAr: 'أعمال التركيب', labelEn: 'Installation' },
+  { key: 'Maintenance', labelAr: 'أعمال الصيانة', labelEn: 'Maintenance' },
+  { key: 'Contracts', labelAr: 'العقود والاتفاقيات', labelEn: 'Contracts' },
+  { key: 'Procurement', labelAr: 'المشتريات والتوريدات', labelEn: 'Procurement' },
+  { key: 'Other', labelAr: 'أخرى', labelEn: 'Other' },
+];
+
 export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser, projects, lang }) => {
   const [documents, setDocuments] = useState<DocumentDto[]>([]);
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeDto[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [selectedTypeId, setSelectedTypeId] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocumentDetailDto | null>(null);
@@ -65,6 +82,7 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
   const [newDescription, setNewDescription] = useState('');
   const [newDocTypeId, setNewDocTypeId] = useState('');
   const [newProjId, setNewProjId] = useState('');
+  const [newCategory, setNewCategory] = useState<string>('TechnicalOffice');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -90,7 +108,7 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
   useEffect(() => {
     loadDocumentTypes();
     loadDocuments();
-  }, [selectedProjectId, selectedTypeId]);
+  }, [selectedProjectId, selectedTypeId, selectedCategory]);
 
   // Real-time synchronization via SignalR & Multi-tab channel
   useEffect(() => {
@@ -147,6 +165,7 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
       const res = await documentsService.getDocuments({
         projectId: selectedProjectId || undefined,
         documentTypeId: selectedTypeId || undefined,
+        category: selectedCategory !== 'All' ? selectedCategory : undefined,
         search: searchQuery || undefined
       });
       if (res.success && res.data) {
@@ -221,7 +240,8 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
           documentTypeId: newDocTypeId,
           title: newTitle,
           description: newDescription,
-          file: selectedFile
+          file: selectedFile,
+          category: newCategory
         },
         (pct) => setUploadPercent(pct)
       );
@@ -506,6 +526,40 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
           </div>
         </div>
       </section>
+
+      {/* DOC-01: Central Document Center - 12 Standard Business Categories */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin">
+        {DOCUMENT_CATEGORIES.map(cat => {
+          const count = cat.key === 'All'
+            ? documents.length
+            : documents.filter(d => (d.category?.toString() === cat.key || d.category?.toString() === (DOCUMENT_CATEGORIES.findIndex(x => x.key === cat.key)).toString())).length;
+          const isSelected = selectedCategory === cat.key;
+          return (
+            <button
+              key={cat.key}
+              onClick={() => setSelectedCategory(cat.key)}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 ${isSelected ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 font-bold shadow-md shadow-cyan-500/20' : 'bg-slate-900 border border-slate-800 text-slate-300 hover:bg-slate-800 hover:text-white'}`}
+            >
+              {isArabic ? cat.labelAr : cat.labelEn}
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${isSelected ? 'bg-slate-950 text-cyan-300 font-bold' : 'bg-slate-800 text-slate-400'}`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* DOC-05: Accounting Security Banner */}
+      {selectedCategory === 'Accounting' && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-2.5 text-xs text-amber-300">
+          <ShieldCheck className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          <span>
+            {isArabic
+              ? 'مستندات الحسابات والمالية (DOC-05): هذه المساحة معزولة ومحمية، ولا تظهر للمستخدمين العاديين، الوصول مقيد للمحاسبين ومدراء النظام فقط.'
+              : 'Accounting Document Center (DOC-05): This workspace is strictly isolated from standard project viewers and accessible only to authorized Accounting Officers and Administrators.'}
+          </span>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="docs-panel rounded-2xl p-3.5 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1064,6 +1118,25 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
                         {documentTypes.map((dt) => (
                           <option key={dt.id} value={dt.id}>
                             {isArabic ? dt.nameAr : dt.nameEn}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="text-start">
+                      <label className="block text-xs font-semibold text-slate-200 mb-1.5">
+                        {isArabic ? 'تصنيف المستند (DOC-01)' : 'Document Category'} <span className="text-rose-400">*</span>
+                      </label>
+                      <select
+                        value={newCategory}
+                        onChange={(e) => setNewCategory(e.target.value)}
+                        required
+                        disabled={actionLoading}
+                        className="field-input w-full px-3 py-2.5 rounded-xl text-sm"
+                      >
+                        {DOCUMENT_CATEGORIES.filter(c => c.key !== 'All').map((cat) => (
+                          <option key={cat.key} value={cat.key}>
+                            {isArabic ? cat.labelAr : cat.labelEn}
                           </option>
                         ))}
                       </select>
