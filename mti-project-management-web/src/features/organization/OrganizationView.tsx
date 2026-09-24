@@ -21,7 +21,8 @@ import {
   ShieldAlert,
   LayoutDashboard,
   KeyRound,
-  History
+  History,
+  Settings
 } from 'lucide-react';
 import { organizationService } from '@/services/organization.service';
 import { Department, Team, TeamMember, User } from '@/types';
@@ -38,10 +39,12 @@ import { DelegationsTab } from './DelegationsTab';
 import { OrganizationDashboardTab } from './OrganizationDashboardTab';
 import { PermissionsManagerTab } from './PermissionsManagerTab';
 import { AssignmentHistoryTab } from './AssignmentHistoryTab';
+import { AdminSystemSettingsTab } from './AdminSystemSettingsTab';
 
 interface OrganizationViewProps {
   currentUser: User | null;
   lang: Language;
+  initialSubTab?: OrgSubTab;
 }
 
 export type OrgSubTab =
@@ -55,10 +58,17 @@ export type OrgSubTab =
   | 'assignment-history'
   | 'team-manager'
   | 'workload'
-  | 'delegations';
+  | 'delegations'
+  | 'system-settings';
 
-export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser, lang }) => {
-  const [activeSubTab, setActiveSubTab] = useState<OrgSubTab>('dashboard');
+export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser, lang, initialSubTab }) => {
+  const [activeSubTab, setActiveSubTab] = useState<OrgSubTab>(initialSubTab || 'dashboard');
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [selectedDeptId, setSelectedDeptId] = useState<string>('');
   const [teams, setTeams] = useState<Team[]>([]);
@@ -232,7 +242,7 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
           }`}
         >
           <KeyRound className="w-4 h-4" />
-          <span>{isArabic ? 'إدارة الصلاحيات (Security)' : 'Permissions & Scopes'}</span>
+          <span>{isArabic ? 'إدارة الصلاحيات' : 'Permissions & Scopes'}</span>
         </button>
 
         <button
@@ -256,8 +266,22 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
           }`}
         >
           <History className="w-4 h-4" />
-          <span>{isArabic ? 'سجل التعيينات (Audit)' : 'Assignment History'}</span>
+          <span>{isArabic ? 'سجل التعيينات' : 'Assignment History'}</span>
         </button>
+
+        {isAdmin && (
+          <button
+            onClick={() => setActiveSubTab('system-settings')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+              activeSubTab === 'system-settings'
+                ? 'bg-cyan-500 text-slate-950 shadow-md shadow-cyan-500/20'
+                : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 border border-slate-800'
+            }`}
+          >
+            <Settings className="w-4 h-4" />
+            <span>{isArabic ? 'إعدادات النظام' : 'System Settings'}</span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveSubTab('team-manager')}
@@ -335,6 +359,10 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
 
       {activeSubTab === 'delegations' && (
         <DelegationsTab currentUser={currentUser} lang={lang} />
+      )}
+
+      {activeSubTab === 'system-settings' && (
+        <AdminSystemSettingsTab lang={lang} />
       )}
 
       {activeSubTab === 'structure' && (

@@ -24,6 +24,7 @@ public class ChatController : ControllerBase
     private readonly IMediaStorageService _mediaStorage;
     private readonly IAuditService _auditService;
     private readonly ICurrentUserService _currentUser;
+    private readonly IResourceAuthorizationService _resourceAuthorization;
 
     public ChatController(
         IAppDbContext dbContext,
@@ -31,7 +32,8 @@ public class ChatController : ControllerBase
         INotificationService notificationService,
         IMediaStorageService mediaStorage,
         IAuditService auditService,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IResourceAuthorizationService resourceAuthorization)
     {
         _dbContext = dbContext;
         _hubContext = hubContext;
@@ -39,6 +41,7 @@ public class ChatController : ControllerBase
         _mediaStorage = mediaStorage;
         _auditService = auditService;
         _currentUser = currentUser;
+        _resourceAuthorization = resourceAuthorization;
     }
 
     /// <summary>
@@ -62,7 +65,7 @@ public class ChatController : ControllerBase
 
         var convs = await _dbContext.Conversations
             .AsNoTracking()
-            .Where(c => !c.IsDeleted && c.Members.Any(m => m.UserId == userId))
+            .Where(c => !c.IsDeleted && c.Members.Any(m => m.UserId == userId && m.LeftAt == null))
             .Include(c => c.Project)
             .Include(c => c.Members).ThenInclude(m => m.User)
             .Include(c => c.Messages.Where(m => !m.IsDeleted)).ThenInclude(m => m.Sender)
@@ -1119,6 +1122,215 @@ public class ChatController : ControllerBase
             .ToListAsync(cancellationToken);
 
         return Ok(receipts);
+    }
+
+    /// <summary>
+    /// CHAT-02: Returns project conversation channels (General, Management, Technical Office, Site Operations).
+    /// Enforces automatic membership sync and permission evaluation.
+    /// Does not expose project conversations to unauthorized company employees.
+    /// </summary>
+    [HttpGet("projects/{projectId:guid}/channels")]
+    public async Task<ActionResult<List<ConversationSummaryDto>>> GetProjectChannels(
+        Guid projectId,
+        CancellationToken cancellationToken)
+    {
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
+
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("SuperAdmin");
+        var hasAccess = isAdmin || await _resourceAuthorization.CanAccessProjectAsync(userId, projectId, cancellationToken);
+        if (!hasAccess)
+        {
+            return Forbid();
+        }
+
+        // 1. Ensure the 4 standard channels exist and members are synchronized
+        await EnsureAndSyncProjectChannelsAsync(projectId, cancellationToken);
+
+        // 2. Fetch conversations for this project where user is an active member or admin
+        var query = _dbContext.Conversations
+            .AsNoTracking()
+            .Where(c => !c.IsDeleted && c.ProjectId == projectId && c.Type == ConversationType.Project);
+
+        if (!isAdmin)
+        {
+            query = query.Where(c => c.Members.Any(m => m.UserId == userId && m.LeftAt == null));
+        }
+
+        var convs = await query
+            .Include(c => c.Project)
+            .Include(c => c.Members.Where(m => m.LeftAt == null)).ThenInclude(m => m.User)
+            .Include(c => c.Messages.Where(m => !m.IsDeleted)).ThenInclude(m => m.Sender)
+            .Include(c => c.Messages.Where(m => !m.IsDeleted)).ThenInclude(m => m.ReadStates).ThenInclude(rs => rs.User)
+            .OrderBy(c => c.Title)
+            .ToListAsync(cancellationToken);
+
+        var list = new List<ConversationSummaryDto>();
+        foreach (var c in convs)
+        {
+            var members = c.Members.Select(MapMember).ToList();
+            var lastMsg = c.Messages.OrderByDescending(m => m.CreatedAt).FirstOrDefault();
+            MessageDto? lastMsgDto = null;
+            if (lastMsg != null)
+            {
+                var readStates = lastMsg.ReadStates.Select(rs => new MessageReadStateDto(
+                    rs.UserId,
+                    rs.User != null ? $"{rs.User.FirstName} {rs.User.LastName}" : "",
+                    rs.ReadAt
+                )).ToList();
+
+                lastMsgDto = new MessageDto(
+                    lastMsg.Id,
+                    lastMsg.ConversationId,
+                    lastMsg.SenderUserId,
+                    $"{lastMsg.Sender.FirstName} {lastMsg.Sender.LastName}",
+                    lastMsg.Content,
+                    lastMsg.IsEdited,
+                    lastMsg.EditedAt,
+                    lastMsg.CreatedAt,
+                    new List<MessageAttachmentDto>(),
+                    new List<MessageReactionDto>(),
+                    readStates
+                );
+            }
+
+            var unreadCount = await _dbContext.Messages
+                .AsNoTracking()
+                .Where(m => m.ConversationId == c.Id && !m.IsDeleted && m.SenderUserId != userId &&
+                            !m.ReadStates.Any(rs => rs.UserId == userId))
+                .CountAsync(cancellationToken);
+
+            list.Add(new ConversationSummaryDto(
+                c.Id,
+                c.Title ?? "Project Channel",
+                true,
+                c.ProjectId,
+                c.Project?.Name,
+                unreadCount,
+                lastMsgDto,
+                members,
+                c.CreatedAt
+            ));
+        }
+
+        return Ok(list);
+    }
+
+    /// <summary>
+    /// CHAT-02: Explicitly triggers automatic project channel membership evaluation and synchronization.
+    /// When assignment ends: deactivates membership (LeftAt = UtcNow).
+    /// When assigned: adds or reactivates membership.
+    /// </summary>
+    [HttpPost("projects/{projectId:guid}/sync-members")]
+    public async Task<ActionResult> SyncProjectChannelMembers(Guid projectId, CancellationToken cancellationToken)
+    {
+        if (!UserClaims.TryGetUserId(User, out var userId)) return Unauthorized();
+
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("SuperAdmin");
+        var hasAccess = isAdmin || await _resourceAuthorization.CanAccessProjectAsync(userId, projectId, cancellationToken);
+        if (!hasAccess) return Forbid();
+
+        await EnsureAndSyncProjectChannelsAsync(projectId, cancellationToken);
+        return Ok(new { success = true, message = "Project channel memberships synchronized successfully." });
+    }
+
+    private async Task EnsureAndSyncProjectChannelsAsync(Guid projectId, CancellationToken ct)
+    {
+        var standardChannels = new[]
+        {
+            "Project General",
+            "Project Management",
+            "Technical Office",
+            "Site Operations"
+        };
+
+        var project = await _dbContext.Projects
+            .Include(p => p.Members)
+            .FirstOrDefaultAsync(p => p.Id == projectId && !p.IsDeleted, ct);
+
+        if (project == null) return;
+
+        // Ensure 4 channel entities exist
+        var existingChannels = await _dbContext.Conversations
+            .Include(c => c.Members)
+            .Where(c => c.ProjectId == projectId && c.Type == ConversationType.Project && !c.IsDeleted)
+            .ToListAsync(ct);
+
+        foreach (var chTitle in standardChannels)
+        {
+            var channel = existingChannels.FirstOrDefault(c => c.Title == chTitle);
+            if (channel == null)
+            {
+                channel = new Conversation
+                {
+                    Id = Guid.NewGuid(),
+                    Title = chTitle,
+                    IsGroup = true,
+                    Type = ConversationType.Project,
+                    ProjectId = projectId,
+                    CreatedAt = DateTime.UtcNow
+                };
+                _dbContext.Conversations.Add(channel);
+                existingChannels.Add(channel);
+            }
+        }
+
+        await _dbContext.SaveChangesAsync(ct);
+
+        // Fetch active project members
+        var activeMembers = project.Members.Where(m => m.IsActive && m.RemovedAt == null).ToList();
+
+        // Also include Admins who have access
+        var adminUserIds = await _dbContext.UserRoles
+            .Where(ur => ur.Role.Name == "Admin" || ur.Role.Name == "SystemAdmin" || ur.Role.Name == "SuperAdmin")
+            .Select(ur => ur.UserId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        foreach (var channel in existingChannels)
+        {
+            Func<ProjectMember, bool> isEligible = channel.Title switch
+            {
+                "Project Management" => pm => pm.ProjectRole is "ProjectManager" or "PM" or "ProjectCoordinator",
+                "Technical Office" => pm => pm.ProjectRole is "TechnicalOffice" or "TechnicalEngineer" or "ProjectManager" or "PM",
+                "Site Operations" => pm => pm.ProjectRole is "SiteManager" or "SiteEngineer" or "SiteSupervisor" or "SoftwareEngineer" or "NetworkEngineer" or "CCTVEngineer" or "ProjectManager" or "PM",
+                _ => pm => true // Project General includes all active project members
+            };
+
+            var eligibleUserIds = activeMembers.Where(isEligible).Select(m => m.UserId).Union(adminUserIds).ToHashSet();
+
+            // 1. Add or reactivate eligible members
+            foreach (var uId in eligibleUserIds)
+            {
+                var existingMember = channel.Members.FirstOrDefault(m => m.UserId == uId);
+                if (existingMember == null)
+                {
+                    channel.Members.Add(new ConversationMember
+                    {
+                        ConversationId = channel.Id,
+                        UserId = uId,
+                        JoinedAt = DateTime.UtcNow,
+                        LeftAt = null,
+                        IsAdmin = adminUserIds.Contains(uId)
+                    });
+                }
+                else if (existingMember.LeftAt != null)
+                {
+                    existingMember.LeftAt = null; // Reactivate
+                    existingMember.JoinedAt = DateTime.UtcNow;
+                }
+            }
+
+            // 2. Deactivate members whose assignment ended or role changed
+            foreach (var m in channel.Members.Where(m => m.LeftAt == null))
+            {
+                if (!eligibleUserIds.Contains(m.UserId))
+                {
+                    m.LeftAt = DateTime.UtcNow; // Deactivate membership according to policy
+                }
+            }
+        }
+
+        await _dbContext.SaveChangesAsync(ct);
     }
 
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

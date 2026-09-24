@@ -32,8 +32,9 @@ import {
   User as UserIcon,
 } from 'lucide-react';
 import { documentsService, CreateDocumentRequest } from '@/services/documents.service';
+import { projectService } from '@/services/project.service';
 import { signalRService } from '@/services/signalr.service';
-import { DocumentDto, DocumentTypeDto, DocumentDetailDto, Project, User } from '@/types';
+import { DocumentDto, DocumentTypeDto, DocumentDetailDto, Project, Site, User } from '@/types';
 import { UploadProgressBar } from '@/components/UploadProgressBar';
 import { ActionLoadingBar } from '@/components/ActionLoadingBar';
 import { Language, getTranslation, formatDateCairo } from '@/lib/i18n';
@@ -42,6 +43,7 @@ interface DocumentsManagerProps {
   currentUser: User | null;
   projects: Project[];
   lang: Language;
+  initialCategory?: string;
 }
 
 const DOCUMENT_CATEGORIES = [
@@ -60,12 +62,12 @@ const DOCUMENT_CATEGORIES = [
   { key: 'Other', labelAr: 'أخرى', labelEn: 'Other' },
 ];
 
-export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser, projects, lang }) => {
+export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser, projects, lang, initialCategory }) => {
   const [documents, setDocuments] = useState<DocumentDto[]>([]);
   const [documentTypes, setDocumentTypes] = useState<DocumentTypeDto[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [selectedTypeId, setSelectedTypeId] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [selectedCategory, setSelectedCategory] = useState<string>(initialCategory || 'All');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocumentDetailDto | null>(null);
@@ -82,8 +84,37 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
   const [newDescription, setNewDescription] = useState('');
   const [newDocTypeId, setNewDocTypeId] = useState('');
   const [newProjId, setNewProjId] = useState('');
+  const [newSiteId, setNewSiteId] = useState('');
+  const [projectSites, setProjectSites] = useState<Site[]>([]);
+  const [loadingProjectSites, setLoadingProjectSites] = useState(false);
   const [newCategory, setNewCategory] = useState<string>('TechnicalOffice');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    if (initialCategory) {
+      setSelectedCategory(initialCategory);
+    }
+  }, [initialCategory]);
+
+  useEffect(() => {
+    if (newProjId) {
+      setLoadingProjectSites(true);
+      projectService
+        .getProjectSites(newProjId)
+        .then((res) => {
+          if (res.success && res.data) {
+            setProjectSites(res.data);
+          } else {
+            setProjectSites([]);
+          }
+        })
+        .catch(() => setProjectSites([]))
+        .finally(() => setLoadingProjectSites(false));
+    } else {
+      setProjectSites([]);
+    }
+    setNewSiteId('');
+  }, [newProjId]);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editDocTypeId, setEditDocTypeId] = useState('');
@@ -223,10 +254,13 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
 
   const handleCreateDocument = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newProjId || !newDocTypeId || !newTitle || !selectedFile) {
-      setActionError(isArabic ? 'يرجى ملء جميع الحقول المطلوبة واختيار الملف' : 'Please fill all required fields and select a file');
+    if (!newProjId || !selectedFile) {
+      setActionError(isArabic ? 'يرجى اختيار المشروع وتحديد الملف المطلوب رفعه' : 'Please select a project and a file to upload');
       return;
     }
+
+    const effectiveTitle = newTitle.trim() || selectedFile.name.substring(0, selectedFile.name.lastIndexOf('.')) || selectedFile.name;
+    const effectiveTypeId = newDocTypeId || (documentTypes[0]?.id || '');
 
     setActionLoading(true);
     setUploadPercent(0);
@@ -237,8 +271,9 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
       const res = await documentsService.createDocument(
         {
           projectId: newProjId,
-          documentTypeId: newDocTypeId,
-          title: newTitle,
+          siteId: newSiteId || undefined,
+          documentTypeId: effectiveTypeId,
+          title: effectiveTitle,
           description: newDescription,
           file: selectedFile,
           category: newCategory
@@ -251,6 +286,7 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
         setShowUploadModal(false);
         setNewTitle('');
         setNewDescription('');
+        setNewSiteId('');
         setSelectedFile(null);
         setUploadPercent(0);
         loadDocuments();
@@ -1081,6 +1117,7 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
                   )}
 
                   <form onSubmit={handleCreateDocument} className="space-y-3.5">
+                    {/* 1. Select Project */}
                     <div className="text-start">
                       <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                         {t('navProjects')} <span className="text-rose-400">*</span>
@@ -1101,31 +1138,34 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
                       </select>
                     </div>
 
+                    {/* 2. Select Site */}
                     <div className="text-start">
                       <label className="block text-xs font-semibold text-slate-200 mb-1.5">
-                        {t('documentType')} <span className="text-rose-400">*</span>
+                        {isArabic ? 'الموقع الميداني (اختياري)' : 'Site (Optional)'}
                       </label>
                       <select
-                        value={newDocTypeId}
-                        onChange={(e) => setNewDocTypeId(e.target.value)}
-                        required
-                        disabled={actionLoading}
+                        value={newSiteId}
+                        onChange={(e) => setNewSiteId(e.target.value)}
+                        disabled={actionLoading || !newProjId}
                         className="field-input w-full px-3 py-2.5 rounded-xl text-sm"
                       >
                         <option value="">
-                          {isArabic ? 'اختر نوع المستند' : 'Select Document Type'}
+                          {loadingProjectSites
+                            ? isArabic ? 'جاري تحميل المواقع...' : 'Loading sites...'
+                            : isArabic ? 'كافة المواقع / المشروع ككل' : 'All Sites / Project-level'}
                         </option>
-                        {documentTypes.map((dt) => (
-                          <option key={dt.id} value={dt.id}>
-                            {isArabic ? dt.nameAr : dt.nameEn}
+                        {projectSites.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.code || 'Site'})
                           </option>
                         ))}
                       </select>
                     </div>
 
+                    {/* 3. Select Category */}
                     <div className="text-start">
                       <label className="block text-xs font-semibold text-slate-200 mb-1.5">
-                        {isArabic ? 'تصنيف المستند (DOC-01)' : 'Document Category'} <span className="text-rose-400">*</span>
+                        {isArabic ? 'تصنيف المستند' : 'Document Category'} <span className="text-rose-400">*</span>
                       </label>
                       <select
                         value={newCategory}
@@ -1134,7 +1174,7 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
                         disabled={actionLoading}
                         className="field-input w-full px-3 py-2.5 rounded-xl text-sm"
                       >
-                        {DOCUMENT_CATEGORIES.filter(c => c.key !== 'All').map((cat) => (
+                        {DOCUMENT_CATEGORIES.filter((c) => c.key !== 'All').map((cat) => (
                           <option key={cat.key} value={cat.key}>
                             {isArabic ? cat.labelAr : cat.labelEn}
                           </option>
@@ -1142,36 +1182,7 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
                       </select>
                     </div>
 
-                    <div className="text-start">
-                      <label className="block text-xs font-semibold text-slate-200 mb-1.5">
-                        {isArabic ? 'عنوان المستند' : 'Title'} <span className="text-rose-400">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={newTitle}
-                        onChange={(e) => setNewTitle(e.target.value)}
-                        required
-                        disabled={actionLoading}
-                        placeholder={
-                          isArabic ? 'مثال: محضر معاينة الموقع الميداني' : 'e.g. Site Survey Report'
-                        }
-                        className="field-input w-full px-3 py-2.5 rounded-xl text-sm"
-                      />
-                    </div>
-
-                    <div className="text-start">
-                      <label className="block text-xs font-semibold text-slate-200 mb-1.5">
-                        {isArabic ? 'الوصف والملاحظات' : 'Description'}
-                      </label>
-                      <textarea
-                        value={newDescription}
-                        onChange={(e) => setNewDescription(e.target.value)}
-                        rows={3}
-                        disabled={actionLoading}
-                        className="field-input w-full px-3 py-2.5 rounded-xl text-sm resize-none"
-                      />
-                    </div>
-
+                    {/* 4. Upload File */}
                     <div className="text-start">
                       <label className="block text-xs font-semibold text-slate-200 mb-1.5">
                         {isArabic ? 'الملف (PDF, DWG, DOCX, ZIP)' : 'File (PDF, DWG, DOCX, ZIP)'}{' '}
@@ -1188,12 +1199,58 @@ export const DocumentsManager: React.FC<DocumentsManagerProps> = ({ currentUser,
                         </span>
                         <input
                           type="file"
-                          onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            setSelectedFile(file);
+                            if (file && !newTitle) {
+                              const base = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
+                              setNewTitle(base);
+                            }
+                          }}
                           required={!selectedFile}
                           disabled={actionLoading}
                           className="sr-only"
                         />
                       </label>
+                    </div>
+
+                    {/* 5. Document Type & Title */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-start">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-200 mb-1.5">
+                          {t('documentType')}
+                        </label>
+                        <select
+                          value={newDocTypeId}
+                          onChange={(e) => setNewDocTypeId(e.target.value)}
+                          disabled={actionLoading}
+                          className="field-input w-full px-3 py-2 rounded-xl text-xs"
+                        >
+                          <option value="">
+                            {isArabic ? 'افتراضي حسب التصنيف' : 'Default by category'}
+                          </option>
+                          {documentTypes.map((dt) => (
+                            <option key={dt.id} value={dt.id}>
+                              {isArabic ? dt.nameAr : dt.nameEn}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-200 mb-1.5">
+                          {isArabic ? 'عنوان المستند' : 'Title'}
+                        </label>
+                        <input
+                          type="text"
+                          value={newTitle}
+                          onChange={(e) => setNewTitle(e.target.value)}
+                          disabled={actionLoading}
+                          placeholder={
+                            isArabic ? 'اسم المستند' : 'Document title'
+                          }
+                          className="field-input w-full px-3 py-2 rounded-xl text-xs"
+                        />
+                      </div>
                     </div>
 
                     {actionLoading && <UploadProgressBar percent={uploadPercent} isArabic={isArabic} />}

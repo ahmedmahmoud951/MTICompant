@@ -62,6 +62,8 @@ public record UpdateUserProfileRequest(
 public record UserPreferenceDto(
     Guid UserId,
     string Language,
+    string DateFormat,
+    string TimeFormat,
     string TimeZone,
     string Theme,
     bool NotificationsEnabled,
@@ -71,6 +73,8 @@ public record UserPreferenceDto(
 
 public record UpdateUserPreferenceRequest(
     string Language = "ar",
+    string DateFormat = "YYYY-MM-DD",
+    string TimeFormat = "24h",
     string TimeZone = "Africa/Cairo",
     string Theme = "light",
     bool NotificationsEnabled = true,

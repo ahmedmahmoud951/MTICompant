@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -44,6 +44,8 @@ public class UserPreferencesController : ControllerBase
             {
                 UserId = userId.Value,
                 Language = "ar",
+                DateFormat = "YYYY-MM-DD",
+                TimeFormat = "24h",
                 TimeZone = "Africa/Cairo",
                 Theme = "light",
                 NotificationsEnabled = true,
@@ -57,6 +59,8 @@ public class UserPreferencesController : ControllerBase
         var dto = new UserPreferenceDto(
             pref.UserId,
             pref.Language,
+            pref.DateFormat,
+            pref.TimeFormat,
             pref.TimeZone,
             pref.Theme,
             pref.NotificationsEnabled,
@@ -88,17 +92,30 @@ public class UserPreferencesController : ControllerBase
         }
 
         pref.Language = string.IsNullOrWhiteSpace(request.Language) ? "ar" : request.Language.Trim().ToLower();
+        pref.DateFormat = string.IsNullOrWhiteSpace(request.DateFormat) ? "YYYY-MM-DD" : request.DateFormat.Trim();
+        pref.TimeFormat = string.IsNullOrWhiteSpace(request.TimeFormat) ? "24h" : request.TimeFormat.Trim();
         pref.TimeZone = string.IsNullOrWhiteSpace(request.TimeZone) ? "Africa/Cairo" : request.TimeZone.Trim();
         pref.Theme = string.IsNullOrWhiteSpace(request.Theme) ? "light" : request.Theme.Trim().ToLower();
         pref.NotificationsEnabled = request.NotificationsEnabled;
         pref.EmailNotifications = request.EmailNotifications;
         pref.UpdatedAt = DateTime.UtcNow;
 
+        // CORE-03: Also persist to User entity directly (User.Language, User.DateFormat, User.TimeFormat)
+        var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == userId.Value, cancellationToken);
+        if (user != null)
+        {
+            user.Language = pref.Language;
+            user.DateFormat = pref.DateFormat;
+            user.TimeFormat = pref.TimeFormat;
+        }
+
         await _dbContext.SaveChangesAsync(cancellationToken);
 
         var dto = new UserPreferenceDto(
             pref.UserId,
             pref.Language,
+            pref.DateFormat,
+            pref.TimeFormat,
             pref.TimeZone,
             pref.Theme,
             pref.NotificationsEnabled,

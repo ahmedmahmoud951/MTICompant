@@ -92,6 +92,7 @@ public class MediaController : ControllerBase
             BucketName = bucketName,
             ObjectKey = objectKey,
             OriginalFileName = request.FileName,
+            Extension = Path.GetExtension(request.FileName) ?? string.Empty,
             StoredFileName = Path.GetFileName(objectKey),
             ContentType = request.ContentType,
             MediaType = mediaType,
@@ -264,6 +265,7 @@ public class MediaController : ControllerBase
             BucketName = bucketName,
             ObjectKey = objectKey,
             OriginalFileName = request.FileName,
+            Extension = Path.GetExtension(request.FileName) ?? string.Empty,
             StoredFileName = Path.GetFileName(objectKey),
             ContentType = request.ContentType,
             MediaType = mediaType,
@@ -443,6 +445,7 @@ public class MediaController : ControllerBase
             BucketName = bucketName,
             ObjectKey = objectKey,
             OriginalFileName = originalFileName,
+            Extension = Path.GetExtension(originalFileName) ?? string.Empty,
             StoredFileName = Path.GetFileName(objectKey),
             ContentType = contentType,
             MediaType = mediaType,
@@ -547,6 +550,9 @@ public class MediaController : ControllerBase
 
     /// <summary>
     /// Owner, Admin/SystemAdmin/SuperAdmin, or project/site-scoped access via related entity.
+    /// <summary>
+    /// Validates User, Permission, Project, Site, Document, and Document/Entity status per STORAGE-02.
+    /// Prevents cross-project or unauthorized data access.
     /// </summary>
     private async Task<bool> CanAccessMediaAsync(MediaFile mediaFile, CancellationToken cancellationToken)
     {
@@ -554,10 +560,11 @@ public class MediaController : ControllerBase
         if (!Guid.TryParse(userIdString, out var userId))
             return false;
 
-        if (mediaFile.OwnerUserId == userId)
+        var isAdmin = User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("SuperAdmin");
+        if (isAdmin)
             return true;
 
-        if (User.IsInRole("Admin") || User.IsInRole("SystemAdmin") || User.IsInRole("SuperAdmin"))
+        if (mediaFile.OwnerUserId == userId)
             return true;
 
         if (!mediaFile.EntityId.HasValue || string.IsNullOrWhiteSpace(mediaFile.EntityType))
@@ -566,14 +573,46 @@ public class MediaController : ControllerBase
         var entityId = mediaFile.EntityId.Value;
         var entityType = mediaFile.EntityType;
 
-        if (entityType.Equals("Document", StringComparison.OrdinalIgnoreCase))
+        if (entityType.Equals("Document", StringComparison.OrdinalIgnoreCase) || entityType.Equals("DocumentVersion", StringComparison.OrdinalIgnoreCase))
         {
             var doc = await _dbContext.Documents.AsNoTracking()
-                .FirstOrDefaultAsync(d => d.Id == entityId && !d.IsDeleted, cancellationToken);
+                .Include(d => d.Versions)
+                .FirstOrDefaultAsync(d => (d.Id == entityId || d.Versions.Any(v => v.Id == entityId || v.FileId == mediaFile.Id)) && !d.IsDeleted, cancellationToken);
             if (doc == null) return false;
+
+            // Validate document status: Draft documents only accessible by Author or Project Members
+            if (doc.Status == DocumentStatus.Draft && doc.UploadedBy != userId)
+            {
+                var isMember = await _dbContext.ProjectMembers.AsNoTracking().AnyAsync(pm => pm.ProjectId == doc.ProjectId && pm.UserId == userId, cancellationToken);
+                if (!isMember) return false;
+            }
+
             if (doc.SiteId.HasValue)
                 return await _resourceAuthorization.CanAccessSiteAsync(userId, doc.SiteId.Value, cancellationToken: cancellationToken);
             return await _resourceAuthorization.CanAccessProjectAsync(userId, doc.ProjectId, cancellationToken: cancellationToken);
+        }
+
+        if (entityType.Equals("Drawing", StringComparison.OrdinalIgnoreCase) || entityType.Equals("DrawingRevision", StringComparison.OrdinalIgnoreCase))
+        {
+            var drawing = await _dbContext.Drawings.AsNoTracking()
+                .Include(d => d.Revisions)
+                .FirstOrDefaultAsync(d => (d.Id == entityId || d.Revisions.Any(r => r.Id == entityId || r.StorageKey == mediaFile.StorageKey)) && !d.IsDeleted, cancellationToken);
+            if (drawing == null) return false;
+
+            if (drawing.SiteId.HasValue)
+                return await _resourceAuthorization.CanAccessSiteAsync(userId, drawing.SiteId.Value, cancellationToken: cancellationToken);
+            return await _resourceAuthorization.CanAccessProjectAsync(userId, drawing.ProjectId, cancellationToken: cancellationToken);
+        }
+
+        if (entityType.Equals("DailyReport", StringComparison.OrdinalIgnoreCase) || entityType.Equals("DailySiteReport", StringComparison.OrdinalIgnoreCase))
+        {
+            var report = await _dbContext.DailySiteReports.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == entityId && !r.IsDeleted, cancellationToken);
+            if (report == null) return false;
+
+            if (report.SiteId != Guid.Empty)
+                return await _resourceAuthorization.CanAccessSiteAsync(userId, report.SiteId, cancellationToken: cancellationToken);
+            return await _resourceAuthorization.CanAccessProjectAsync(userId, report.ProjectId, cancellationToken: cancellationToken);
         }
 
         if (entityType.Equals("Task", StringComparison.OrdinalIgnoreCase))
@@ -584,6 +623,13 @@ public class MediaController : ControllerBase
             if (task.SiteId.HasValue)
                 return await _resourceAuthorization.CanAccessSiteAsync(userId, task.SiteId.Value, cancellationToken: cancellationToken);
             return await _resourceAuthorization.CanAccessProjectAsync(userId, task.ProjectId, cancellationToken: cancellationToken);
+        }
+
+        if (entityType.Equals("Chat", StringComparison.OrdinalIgnoreCase) || entityType.Equals("Message", StringComparison.OrdinalIgnoreCase))
+        {
+            var isMember = await _dbContext.ConversationMembers.AsNoTracking()
+                .AnyAsync(m => (m.ConversationId == entityId || m.Conversation.Messages.Any(msg => msg.Id == entityId)) && m.UserId == userId && m.LeftAt == null, cancellationToken);
+            return isMember;
         }
 
         if (entityType.Equals("ProjectData", StringComparison.OrdinalIgnoreCase))

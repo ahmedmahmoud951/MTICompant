@@ -67,14 +67,16 @@ public class BackblazeB2StorageService : IMediaStorageService, IB2StorageService
 
     public string BuildDocumentObjectKey(Guid projectId, Guid documentId, Guid versionId, string fileName)
     {
-        var safeFileName = SanitizeFileName(fileName);
-        return $"projects/{projectId}/documents/{documentId}/versions/{versionId}/{safeFileName}";
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext.Length > 16) ext = "";
+        return $"projects/{projectId}/sites/root/documents/{Guid.NewGuid():N}{ext}";
     }
 
     public string BuildAssetObjectKey(Guid projectId, Guid assetId, string fileName)
     {
-        var safeFileName = SanitizeFileName(fileName);
-        return $"projects/{projectId}/assets/{assetId}/{safeFileName}";
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext.Length > 16) ext = "";
+        return $"projects/{projectId}/sites/root/assets/{Guid.NewGuid():N}{ext}";
     }
 
     public static string ComputeSha256(Stream stream)
@@ -87,22 +89,53 @@ public class BackblazeB2StorageService : IMediaStorageService, IB2StorageService
 
     public string BuildChatObjectKey(Guid conversationId, Guid messageId, Guid attachmentId, string fileName)
     {
-        var safeFileName = SanitizeFileName(fileName);
-        return $"chat/{conversationId}/{messageId}/{attachmentId}/{safeFileName}";
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext.Length > 16) ext = "";
+        return $"chat/{conversationId}/{Guid.NewGuid():N}{ext}";
     }
 
+    /// <summary>
+    /// Builds Backblaze B2 object key strictly conforming to STORAGE-01 specification:
+    /// projects/{projectId}/sites/{siteId}/{module}/{uniqueKey}{ext}
+    /// Never uses the raw user filename as the storage key.
+    /// </summary>
     public string BuildObjectKey(string entityType, Guid? projectId, Guid? siteId, Guid? entityId, Guid mediaId, string fileName)
     {
-        var cleanFileName = Path.GetFileName(fileName).Replace(" ", "_");
-        return entityType.ToLowerInvariant() switch
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (ext.Length > 16) ext = "";
+        var uniqueKey = mediaId == Guid.Empty ? Guid.NewGuid().ToString("N") : mediaId.ToString("N");
+
+        var normalizedType = entityType.ToLowerInvariant().Replace(" ", "").Replace("_", "").Replace("-", "");
+
+        // Map to exact STORAGE-01 module directories:
+        // documents, drawings, daily-reports, data-sheets, technical-office, accounting, software, installation, maintenance
+        var module = normalizedType switch
         {
-            "document" or "documentversion" => $"projects/{projectId}/documents/{entityId}/versions/{mediaId}/{cleanFileName}",
-            "asset" or "companyasset" => $"projects/{projectId}/assets/{entityId}/{cleanFileName}",
-            "chat" or "conversation" => $"chat/{entityId}/media/{mediaId}/{cleanFileName}",
-            "projectdata" or "data" => $"projects/{projectId}/sites/{siteId}/data/{entityId}/media/{mediaId}/{cleanFileName}",
-            "task" or "taskitem" => $"tasks/{entityId}/attachments/{mediaId}/{cleanFileName}",
-            "user" or "profile" => $"users/{entityId}/profile/{mediaId}/{cleanFileName}",
-            _ => $"general/{entityType.ToLowerInvariant()}/{entityId}/{mediaId}/{cleanFileName}"
+            "document" or "documents" or "documentversion" or "doc" => "documents",
+            "drawing" or "drawings" or "drawingrevision" => "drawings",
+            "dailyreport" or "dailyreports" or "operation" or "operationphoto" or "report" or "reports" => "daily-reports",
+            "datasheet" or "datasheets" or "productdatasheet" => "data-sheets",
+            "technicaloffice" or "boq" or "methodstatement" or "technicalsubmittal" or "technicaloffer" => "technical-office",
+            "accounting" or "invoice" or "payment" or "financial" => "accounting",
+            "software" => "software",
+            "installation" => "installation",
+            "maintenance" => "maintenance",
+            _ => normalizedType
+        };
+
+        if (projectId.HasValue)
+        {
+            var siteSegment = siteId.HasValue ? siteId.Value.ToString() : "root";
+            return $"projects/{projectId.Value}/sites/{siteSegment}/{module}/{uniqueKey}{ext}";
+        }
+
+        // Non-project scoped entities
+        return normalizedType switch
+        {
+            "chat" or "conversation" or "message" => $"chat/{entityId ?? Guid.NewGuid()}/{uniqueKey}{ext}",
+            "task" or "taskitem" => $"tasks/{entityId ?? Guid.NewGuid()}/{uniqueKey}{ext}",
+            "user" or "profile" or "avatar" => $"users/{entityId ?? Guid.NewGuid()}/{uniqueKey}{ext}",
+            _ => $"general/{module}/{uniqueKey}{ext}"
         };
     }
 

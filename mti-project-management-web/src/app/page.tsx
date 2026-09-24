@@ -123,6 +123,7 @@ import {
 } from 'lucide-react';
 import { ActionLoadingBar } from '@/components/ActionLoadingBar';
 import { ReportDetailsModal } from '@/components/ReportDetailsModal';
+import { AdminSystemSettingsTab } from '@/features/organization/AdminSystemSettingsTab';
 import { Language, getTranslation, TranslationKey, formatDateCairo } from '@/lib/i18n';
 import { API_BASE_URL, apiClient } from '@/lib/api-client';
 import { logger } from '@/lib/logger';
@@ -271,8 +272,22 @@ export default function Home() {
   // Mobile & Tablet Responsive Navigation
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Bilingual / Internationalization (Arabic 🇪🇬 / English 🇺🇸)
+  // Bilingual / Internationalization (Arabic / English)
   const [lang, setLang] = useState<Language>('ar');
+  const isArabic = lang === 'ar';
+
+  const [expandedNavGroups, setExpandedNavGroups] = useState<Record<string, boolean>>({
+    'projects-group': true,
+    'sites-group': false,
+    'tasks-group': false,
+    'documents-group': false,
+    'organization-group': false,
+    'admin-group': false
+  });
+
+  const toggleNavGroup = (groupId: string) => {
+    setExpandedNavGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
+  };
 
   const t = (k: TranslationKey) => getTranslation(k, lang);
 
@@ -281,9 +296,12 @@ export default function Home() {
     setLang(next);
     if (typeof window !== 'undefined') {
       localStorage.setItem('mti_lang', next);
+      localStorage.setItem('mti-language', next);
       document.documentElement.dir = next === 'ar' ? 'rtl' : 'ltr';
       document.documentElement.lang = next;
     }
+    // CORE-03: Persist language preference to backend
+    apiClient.put('/api/user/preferences', { language: next }).catch(() => {});
     logger.info('Language toggled', { language: next });
   };
 
@@ -427,6 +445,12 @@ export default function Home() {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [newTaskAssigneeId, setNewTaskAssigneeId] = useState('');
   const [newTaskDesc, setNewTaskDesc] = useState('');
+  const [newTaskProjectId, setNewTaskProjectId] = useState<string>('');
+  const [newTaskSiteId, setNewTaskSiteId] = useState<string>('');
+  const [newTaskDeadline, setNewTaskDeadline] = useState<string>('');
+  const [docInitialCategory, setDocInitialCategory] = useState<string>('All');
+  const [orgInitialSubTab, setOrgInitialSubTab] = useState<any>('dashboard');
+  const [taskFilterContext, setTaskFilterContext] = useState<'all' | 'my' | 'team'>('all');
 
   // Enterprise Drawer (Side inspection panel)
   const [drawerData, setDrawerData] = useState<{ title: string; type: string; details: any } | null>(null);
@@ -2298,7 +2322,8 @@ export default function Home() {
   // Task Center Actions
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProjectId && !editingTaskId) {
+    const effectiveProjectId = newTaskProjectId || selectedProjectId || (projects[0]?.id || '');
+    if (!effectiveProjectId && !editingTaskId) {
       alert(lang === 'ar' ? 'اختر مشروعاً أولاً' : 'Please select a project first.');
       return;
     }
@@ -2311,17 +2336,19 @@ export default function Home() {
           description: newTaskDesc || '',
           priority: newTaskPriority,
           assignedToUserId: newTaskAssigneeId || undefined,
+          dueAt: newTaskDeadline ? new Date(newTaskDeadline).toISOString() : undefined,
           status: existing?.status
         });
         signalRService.emit('TaskUpdated', { id: editingTaskId, title: newTaskTitle });
       } else {
         await taskService.createTask({
-          projectId: selectedProjectId!,
-          siteId: selectedProjectSites[0]?.id,
+          projectId: effectiveProjectId,
+          siteId: newTaskSiteId || undefined,
           title: newTaskTitle,
           description: newTaskDesc || undefined,
           priority: newTaskPriority,
-          assignedToUserId: newTaskAssigneeId || undefined
+          assignedToUserId: newTaskAssigneeId || undefined,
+          dueAt: newTaskDeadline ? new Date(newTaskDeadline).toISOString() : undefined
         });
         signalRService.emit('TaskCreated', { title: newTaskTitle });
       }
@@ -2329,6 +2356,9 @@ export default function Home() {
       setNewTaskTitle('');
       setNewTaskDesc('');
       setNewTaskAssigneeId('');
+      setNewTaskProjectId('');
+      setNewTaskSiteId('');
+      setNewTaskDeadline('');
       setEditingTaskId(null);
       setShowNewTaskModal(false);
       const updated = await taskService.getTasks();
@@ -2346,6 +2376,9 @@ export default function Home() {
     setNewTaskDesc((task as any).description || '');
     setNewTaskPriority(task.priority || 'Medium');
     setNewTaskAssigneeId(task.assignedToUserId || '');
+    setNewTaskProjectId(task.projectId || '');
+    setNewTaskSiteId(task.siteId || '');
+    setNewTaskDeadline(task.dueAt ? task.dueAt.slice(0, 10) : '');
     setShowNewTaskModal(true);
   };
 
@@ -2677,102 +2710,398 @@ export default function Home() {
 
   const isAdmin = currentUser.roles.includes('Admin') || currentUser.roles.includes('SystemAdmin');
 
-  interface MenuItem {
+  interface NavSubItem {
+    id: string;
+    label: string;
+    badge?: number;
+    onClick: () => void;
+    isActive: boolean;
+  }
+
+  interface NavGroupItem {
     id: string;
     label: string;
     icon: any;
     badge?: number;
+    children?: NavSubItem[];
+    onClick?: () => void;
+    isActive?: boolean;
+    requiredRole?: string[];
+    requiredPermission?: string[];
   }
 
-  // Sidebar Menu Items based on Persona (Prompt 20)
-  // Sidebar Menu Items based on Persona with bilingual support
-  const adminMenuItems: MenuItem[] = [
-    { id: 'dashboard', label: t('navDashboard'), icon: LayoutDashboard },
-    { id: 'projects', label: t('navProjects'), icon: FolderKanban },
-    { id: 'milestones', label: t('navMilestones'), icon: Layers },
-    { id: 'documents', label: t('navDocuments'), icon: FileText },
-    { id: 'drawings', label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings', icon: Compass },
-    { id: 'datasheets', label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets', icon: Cpu },
-    { id: 'operations', label: t('navSiteOperations'), icon: Wrench },
-    { id: 'daily-reports', label: t('navDailyReports'), icon: FileSpreadsheet },
-    { id: 'accounting', label: t('navAccounting'), icon: DollarSign },
-    { id: 'organization', label: t('navOrganization'), icon: Users },
-    { id: 'technical-office', label: t('navTechnicalOffice'), icon: Briefcase },
-    { id: 'materials-assets', label: t('navMaterialsAssets'), icon: Package },
-    { id: 'governance', label: t('navGovernance'), icon: Award },
-    { id: 'sites', label: t('navSites'), icon: MapPin },
-    { id: 'engineers', label: t('navEngineers'), icon: Users },
-    { id: 'project-data', label: t('navProjectData'), icon: FileSpreadsheet },
-    { id: 'reports-archive', label: t('navReportsArchive'), icon: ShieldCheck, badge: approvedRecords.length },
-    { id: 'approvals', label: t('navApprovals'), icon: FileCheck, badge: pendingRecords.length },
-    { id: 'tasks', label: t('navTasks'), icon: CheckSquare },
-    { id: 'activity', label: lang === 'ar' ? 'مركز النشاط والعمليات' : 'Activity Center', icon: Activity },
-    { id: 'chat', label: t('navChat'), icon: MessageSquare },
-    { id: 'notifications', label: t('navNotifications'), icon: Bell },
-    { id: 'reports', label: t('navReports'), icon: BarChart3 },
-    { id: 'audit', label: t('navAudit'), icon: History },
-    { id: 'settings', label: t('navSettings'), icon: Settings }
-  ];
+  const isNavVisible = (item: { requiredRole?: string[]; requiredPermission?: string[] }) => {
+    if (isAdmin) return true;
+    if (item.requiredRole && item.requiredRole.length > 0) {
+      const hasRole = item.requiredRole.some((r) => ((currentUser.roles || []) as string[]).includes(r));
+      if (!hasRole) return false;
+    }
+    if (item.requiredPermission && item.requiredPermission.length > 0) {
+      const hasPerm = item.requiredPermission.some(
+        (p) => currentUser.permissions?.includes(p) || currentUser.permissions?.some((cp: string) => cp.startsWith(p))
+      );
+      if (!hasPerm) return false;
+    }
+    return true;
+  };
 
-  const engineerMenuItems: MenuItem[] = [
-    { id: 'dashboard', label: t('navDashboard'), icon: LayoutDashboard },
-    { id: 'my-projects', label: t('navMyProjects'), icon: FolderKanban },
-    { id: 'milestones', label: t('navMilestones'), icon: Layers },
-    { id: 'documents', label: t('navDocuments'), icon: FileText },
-    { id: 'drawings', label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings', icon: Compass },
-    { id: 'datasheets', label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets', icon: Cpu },
-    { id: 'operations', label: t('navSiteOperations'), icon: Wrench },
-    { id: 'daily-reports', label: t('navDailyReports'), icon: FileSpreadsheet },
-    { id: 'activity', label: lang === 'ar' ? 'مركز النشاط والعمليات' : 'Activity Center', icon: Activity },
-    { id: 'my-sites', label: t('navMySites'), icon: MapPin },
-    { id: 'my-data', label: t('navMyData'), icon: FileSpreadsheet },
-    { id: 'reports-archive', label: t('navReportsArchive'), icon: ShieldCheck, badge: approvedRecords.length },
-    { id: 'reports', label: t('navReports'), icon: BarChart3 },
-    { id: 'my-tasks', label: t('navMyTasks'), icon: CheckSquare },
-    { id: 'chat', label: t('navChat'), icon: MessageSquare },
-    { id: 'notifications', label: t('navNotifications'), icon: Bell },
-    { id: 'profile', label: t('navProfile'), icon: UserCircle }
-  ];
+  const mainNavTree: NavGroupItem[] = [
+    // 1. Dashboard
+    {
+      id: 'dashboard',
+      label: t('navDashboard'),
+      icon: LayoutDashboard,
+      isActive: activeTab === 'dashboard',
+      onClick: () => setActiveTab('dashboard')
+    },
 
-  const technicalOfficeMenuItems: MenuItem[] = [
-    { id: 'dashboard', label: t('navDashboard'), icon: LayoutDashboard },
-    { id: 'my-projects', label: t('navMyProjects'), icon: FolderKanban },
-    { id: 'milestones', label: t('navMilestones'), icon: Layers },
-    { id: 'documents', label: t('navDocuments'), icon: FileText },
-    { id: 'drawings', label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings', icon: Compass },
-    { id: 'datasheets', label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets', icon: Cpu },
-    { id: 'operations', label: t('navSiteOperations'), icon: Wrench },
-    { id: 'daily-reports', label: t('navDailyReports'), icon: FileSpreadsheet },
-    { id: 'technical-office', label: t('navTechnicalOffice'), icon: Briefcase },
-    { id: 'activity', label: lang === 'ar' ? 'مركز النشاط والعمليات' : 'Activity Center', icon: Activity },
-    { id: 'my-sites', label: t('navMySites'), icon: MapPin },
-    { id: 'my-data', label: t('navMyData'), icon: FileSpreadsheet },
-    { id: 'reports-archive', label: t('navReportsArchive'), icon: ShieldCheck, badge: approvedRecords.length },
-    { id: 'reports', label: t('navReports'), icon: BarChart3 },
-    { id: 'my-tasks', label: t('navMyTasks'), icon: CheckSquare },
-    { id: 'chat', label: t('navChat'), icon: MessageSquare },
-    { id: 'notifications', label: t('navNotifications'), icon: Bell },
-    { id: 'profile', label: t('navProfile'), icon: UserCircle }
-  ];
+    // 2. My Workspace
+    {
+      id: 'my-workspace',
+      label: lang === 'ar' ? 'مساحة عملي' : 'My Workspace',
+      icon: Layers,
+      isActive: activeTab === 'my-projects' || activeTab === 'my-tasks' || activeTab === 'my-sites' || activeTab === 'my-data',
+      onClick: () => {
+        if (isAdmin) {
+          setActiveTab('dashboard');
+        } else {
+          setActiveTab('my-projects');
+        }
+      }
+    },
 
-  const isAccountant =
-    (currentUser.roles as string[]).includes('Accountant') ||
-    (currentUser.roles as string[]).includes('Accounting') ||
-    (currentUser.permissions && currentUser.permissions.some((p: string) => p.startsWith('Accounting.')));
-  const isTechnicalOffice = (currentUser.roles as string[]).includes('TechnicalOffice');
-  const accountantMenuItems: MenuItem[] = [
-    { id: 'accounting', label: t('navAccounting'), icon: DollarSign },
-    { id: 'notifications', label: t('navNotifications'), icon: Bell },
-    { id: 'profile', label: t('navProfile'), icon: UserCircle }
-  ];
+    // 3. Projects (All Projects, My Projects, Project Tasks)
+    {
+      id: 'projects-group',
+      label: t('navProjects'),
+      icon: FolderKanban,
+      isActive: activeTab === 'projects' || activeTab === 'my-projects' || (activeTab === 'tasks' && taskFilterContext === 'all'),
+      children: [
+        {
+          id: 'all-projects',
+          label: lang === 'ar' ? 'جميع المشاريع' : 'All Projects',
+          isActive: activeTab === 'projects',
+          onClick: () => {
+            setActiveTab('projects');
+            loadProjects();
+          }
+        },
+        {
+          id: 'my-projects',
+          label: t('navMyProjects'),
+          isActive: activeTab === 'my-projects',
+          onClick: () => {
+            setActiveTab('my-projects');
+            loadProjects();
+          }
+        },
+        {
+          id: 'project-tasks',
+          label: lang === 'ar' ? 'مهام المشاريع' : 'Project Tasks',
+          isActive: activeTab === 'tasks' && taskFilterContext === 'all',
+          onClick: () => {
+            setTaskFilterContext('all');
+            setActiveTab('tasks');
+          }
+        }
+      ]
+    },
 
-  const menuItems: MenuItem[] = isAdmin
-    ? adminMenuItems
-    : isAccountant
-      ? accountantMenuItems
-      : isTechnicalOffice
-        ? technicalOfficeMenuItems
-        : engineerMenuItems;
+    // 4. Sites (All Sites, My Sites, Site Tasks)
+    {
+      id: 'sites-group',
+      label: t('navSites'),
+      icon: MapPin,
+      isActive: activeTab === 'sites' || activeTab === 'my-sites',
+      children: [
+        {
+          id: 'all-sites',
+          label: lang === 'ar' ? 'جميع المواقع' : 'All Sites',
+          isActive: activeTab === 'sites',
+          onClick: () => setActiveTab('sites')
+        },
+        {
+          id: 'my-sites',
+          label: t('navMySites'),
+          isActive: activeTab === 'my-sites',
+          onClick: () => setActiveTab('my-sites')
+        },
+        {
+          id: 'site-tasks',
+          label: lang === 'ar' ? 'مهام المواقع' : 'Site Tasks',
+          isActive: activeTab === 'tasks' && taskFilterContext === 'all',
+          onClick: () => {
+            setTaskFilterContext('all');
+            setActiveTab('tasks');
+          }
+        }
+      ]
+    },
+
+    // 5. Tasks (My Tasks, Team Tasks, All Tasks)
+    {
+      id: 'tasks-group',
+      label: t('navTasks'),
+      icon: CheckSquare,
+      badge: tasks.filter((tk) => tk.priority === 'Critical' || (tk.priority as string) === 'Urgent' || tk.isOverdue).length || undefined,
+      isActive: activeTab === 'tasks' || activeTab === 'my-tasks',
+      children: [
+        {
+          id: 'my-tasks',
+          label: t('navMyTasks'),
+          isActive: activeTab === 'my-tasks',
+          onClick: () => {
+            setTaskFilterContext('my');
+            setActiveTab('my-tasks');
+          }
+        },
+        {
+          id: 'team-tasks',
+          label: lang === 'ar' ? 'مهام الفريق' : 'Team Tasks',
+          isActive: activeTab === 'tasks' && taskFilterContext === 'team',
+          onClick: () => {
+            setTaskFilterContext('team');
+            setActiveTab('tasks');
+          }
+        },
+        {
+          id: 'all-tasks',
+          label: lang === 'ar' ? 'جميع المهام' : 'All Tasks',
+          isActive: activeTab === 'tasks' && taskFilterContext === 'all',
+          onClick: () => {
+            setTaskFilterContext('all');
+            setActiveTab('tasks');
+          }
+        }
+      ]
+    },
+
+    // 6. Documents (Project Documents, Site Documents, Technical Office, Accounting, Drawings, Daily Reports, Data Sheets)
+    {
+      id: 'documents-group',
+      label: t('navDocuments'),
+      icon: FileText,
+      isActive:
+        activeTab === 'documents' ||
+        activeTab === 'drawings' ||
+        activeTab === 'datasheets' ||
+        activeTab === 'accounting' ||
+        activeTab === 'daily-reports',
+      children: [
+        {
+          id: 'doc-project',
+          label: lang === 'ar' ? 'مستندات المشاريع' : 'Project Documents',
+          isActive: activeTab === 'documents' && docInitialCategory === 'All',
+          onClick: () => {
+            setDocInitialCategory('All');
+            setActiveTab('documents');
+          }
+        },
+        {
+          id: 'doc-site',
+          label: lang === 'ar' ? 'مستندات المواقع' : 'Site Documents',
+          isActive: activeTab === 'documents' && docInitialCategory === 'SiteDocuments',
+          onClick: () => {
+            setDocInitialCategory('SiteDocuments');
+            setActiveTab('documents');
+          }
+        },
+        {
+          id: 'doc-tech-office',
+          label: t('navTechnicalOffice'),
+          isActive: activeTab === 'documents' && docInitialCategory === 'TechnicalOffice',
+          onClick: () => {
+            setDocInitialCategory('TechnicalOffice');
+            setActiveTab('documents');
+          }
+        },
+        {
+          id: 'doc-accounting',
+          label: t('navAccounting'),
+          isActive: activeTab === 'accounting' || (activeTab === 'documents' && docInitialCategory === 'Accounting'),
+          onClick: () => {
+            setActiveTab('accounting');
+          }
+        },
+        {
+          id: 'doc-drawings',
+          label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings',
+          isActive: activeTab === 'drawings' || (activeTab === 'documents' && docInitialCategory === 'Drawings'),
+          onClick: () => {
+            setActiveTab('drawings');
+          }
+        },
+        {
+          id: 'doc-daily-reports',
+          label: t('navDailyReports'),
+          isActive: activeTab === 'daily-reports' || (activeTab === 'documents' && docInitialCategory === 'DailyReports'),
+          onClick: () => {
+            setActiveTab('daily-reports');
+          }
+        },
+        {
+          id: 'doc-datasheets',
+          label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets',
+          isActive: activeTab === 'datasheets' || (activeTab === 'documents' && docInitialCategory === 'DataSheets'),
+          onClick: () => {
+            setActiveTab('datasheets');
+          }
+        }
+      ]
+    },
+
+    // 7. Technical Office
+    {
+      id: 'technical-office',
+      label: t('navTechnicalOffice'),
+      icon: Briefcase,
+      isActive: activeTab === 'technical-office',
+      onClick: () => setActiveTab('technical-office'),
+      requiredRole: ['TechnicalOffice', 'Admin', 'SystemAdmin', 'ProjectManager']
+    },
+
+    // 8. Drawings
+    {
+      id: 'drawings',
+      label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings',
+      icon: Compass,
+      isActive: activeTab === 'drawings',
+      onClick: () => setActiveTab('drawings')
+    },
+
+    // 9. Reports
+    {
+      id: 'reports',
+      label: t('navReports'),
+      icon: BarChart3,
+      isActive: activeTab === 'reports' || activeTab === 'reports-archive',
+      onClick: () => setActiveTab('reports')
+    },
+
+    // 10. Chat
+    {
+      id: 'chat',
+      label: t('navChat'),
+      icon: MessageSquare,
+      badge: totalUnreadMessages || undefined,
+      isActive: activeTab === 'chat',
+      onClick: () => setActiveTab('chat')
+    },
+
+    // 11. Notifications
+    {
+      id: 'notifications',
+      label: t('navNotifications'),
+      icon: Bell,
+      badge: notificationsList.filter((n) => !n.isRead).length || undefined,
+      isActive: activeTab === 'notifications',
+      onClick: () => setActiveTab('notifications')
+    },
+
+    // 12. Organization (Departments, Teams, Employees)
+    {
+      id: 'organization-group',
+      label: t('navOrganization'),
+      icon: Users,
+      isActive: activeTab === 'organization',
+      requiredRole: ['Admin', 'SystemAdmin', 'SuperAdmin', 'HR', 'GeneralManager'],
+      children: [
+        {
+          id: 'org-departments',
+          label: lang === 'ar' ? 'الإدارات والأقسام' : 'Departments',
+          isActive: activeTab === 'organization' && orgInitialSubTab === 'structure',
+          onClick: () => {
+            setOrgInitialSubTab('structure');
+            setActiveTab('organization');
+          }
+        },
+        {
+          id: 'org-teams',
+          label: lang === 'ar' ? 'فرق العمل' : 'Teams',
+          isActive: activeTab === 'organization' && orgInitialSubTab === 'team-manager',
+          onClick: () => {
+            setOrgInitialSubTab('team-manager');
+            setActiveTab('organization');
+          }
+        },
+        {
+          id: 'org-employees',
+          label: lang === 'ar' ? 'الموظفين' : 'Employees',
+          isActive: activeTab === 'organization' && orgInitialSubTab === 'users',
+          onClick: () => {
+            setOrgInitialSubTab('users');
+            setActiveTab('organization');
+          }
+        }
+      ]
+    },
+
+    // 13. Administration (Users, Roles, Permissions, Master Data, Audit Logs, System Settings)
+    {
+      id: 'admin-group',
+      label: lang === 'ar' ? 'الإدارة والتحكم' : 'Administration',
+      icon: Settings,
+      isActive:
+        activeTab === 'settings' ||
+        activeTab === 'audit' ||
+        (activeTab === 'organization' &&
+          (orgInitialSubTab === 'permissions' || orgInitialSubTab === 'master-data' || orgInitialSubTab === 'system-settings')),
+      requiredRole: ['Admin', 'SystemAdmin', 'SuperAdmin'],
+      children: [
+        {
+          id: 'adm-users',
+          label: lang === 'ar' ? 'المستخدمين' : 'Users',
+          isActive: (activeTab === 'organization' && orgInitialSubTab === 'users') || activeTab === 'engineers',
+          onClick: () => {
+            setOrgInitialSubTab('users');
+            setActiveTab('organization');
+          }
+        },
+        {
+          id: 'adm-roles',
+          label: lang === 'ar' ? 'الأدوار' : 'Roles',
+          isActive: activeTab === 'organization' && orgInitialSubTab === 'permissions',
+          onClick: () => {
+            setOrgInitialSubTab('permissions');
+            setActiveTab('organization');
+          }
+        },
+        {
+          id: 'adm-permissions',
+          label: lang === 'ar' ? 'الصلاحيات' : 'Permissions',
+          isActive: activeTab === 'organization' && orgInitialSubTab === 'permissions',
+          onClick: () => {
+            setOrgInitialSubTab('permissions');
+            setActiveTab('organization');
+          }
+        },
+        {
+          id: 'adm-master-data',
+          label: lang === 'ar' ? 'البيانات المرجعية' : 'Master Data',
+          isActive: activeTab === 'organization' && orgInitialSubTab === 'master-data',
+          onClick: () => {
+            setOrgInitialSubTab('master-data');
+            setActiveTab('organization');
+          }
+        },
+        {
+          id: 'adm-audit',
+          label: lang === 'ar' ? 'سجلات النظام' : 'Audit Logs',
+          isActive: activeTab === 'audit',
+          onClick: () => setActiveTab('audit')
+        },
+        {
+          id: 'adm-settings',
+          label: lang === 'ar' ? 'إعدادات النظام' : 'System Settings',
+          isActive: activeTab === 'settings' || (activeTab === 'organization' && orgInitialSubTab === 'system-settings'),
+          onClick: () => {
+            setOrgInitialSubTab('system-settings');
+            setActiveTab('settings');
+          }
+        }
+      ]
+    }
+  ];
 
   // -------------------------------------------------------------
   // Authenticated Desktop & Mobile Responsive Enterprise Layout
@@ -2813,35 +3142,106 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Sidebar Menu Items */}
+        {/* Sidebar Menu Items (Hierarchical Tree) */}
         <div className="flex-1 overflow-y-auto p-3 space-y-1">
-          {menuItems.map((item) => {
-            const Icon = item.icon;
-            const isCurrent = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  setActiveTab(item.id);
-                  logger.info('Tab switched', { tab: item.id });
-                  if (item.id === 'my-projects' || item.id === 'projects') loadProjects();
-                }}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-semibold transition-all ${isCurrent
-                    ? 'nav-item-active'
-                    : 'text-slate-500 hover:text-slate-100 hover:bg-slate-700/40'
+          {mainNavTree.filter(isNavVisible).map((group) => {
+            const Icon = group.icon;
+            const hasChildren = group.children && group.children.length > 0;
+            const isExpanded = !!expandedNavGroups[group.id];
+            const isGroupActive = group.isActive || (group.children && group.children.some((c) => c.isActive));
+
+            if (!hasChildren) {
+              return (
+                <button
+                  key={group.id}
+                  onClick={() => {
+                    if (group.onClick) group.onClick();
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                    isGroupActive
+                      ? 'nav-item-active'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
                   }`}
-                title={sidebarCollapsed ? item.label : undefined}
-              >
-                <div className="flex items-center gap-3">
-                  <Icon className="w-4 h-4 flex-shrink-0" strokeWidth={1.8} />
-                  {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
-                </div>
-                {!sidebarCollapsed && item.badge && item.badge > 0 && (
-                  <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-white font-bold text-[10px]">
-                    {item.badge}
-                  </span>
+                  title={sidebarCollapsed ? group.label : undefined}
+                >
+                  <div className="flex items-center gap-3">
+                    <Icon className="w-4 h-4 flex-shrink-0" strokeWidth={1.8} />
+                    {!sidebarCollapsed && <span className="truncate">{group.label}</span>}
+                  </div>
+                  {!sidebarCollapsed && group.badge && group.badge > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px]">
+                      {group.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            }
+
+            // Has children -> Collapsible Accordion Group
+            return (
+              <div key={group.id} className="space-y-0.5">
+                <button
+                  onClick={() => {
+                    if (sidebarCollapsed) {
+                      setSidebarCollapsed(false);
+                      setExpandedNavGroups((prev) => ({ ...prev, [group.id]: true }));
+                    } else {
+                      setExpandedNavGroups((prev) => ({ ...prev, [group.id]: !prev[group.id] }));
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+                    isGroupActive
+                      ? 'text-cyan-300 bg-cyan-950/30 border border-cyan-500/25'
+                      : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                  }`}
+                  title={sidebarCollapsed ? group.label : undefined}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Icon className="w-4 h-4 flex-shrink-0" strokeWidth={1.8} />
+                    {!sidebarCollapsed && <span className="truncate">{group.label}</span>}
+                  </div>
+                  {!sidebarCollapsed && (
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      {group.badge && group.badge > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px]">
+                          {group.badge}
+                        </span>
+                      )}
+                      <ChevronDown
+                        className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                          isExpanded ? 'rotate-180 text-cyan-300' : ''
+                        }`}
+                      />
+                    </div>
+                  )}
+                </button>
+
+                {/* Children Sub-Menu */}
+                {!sidebarCollapsed && isExpanded && (
+                  <div className="ms-4 ps-2 border-s border-slate-700/60 space-y-0.5 my-1">
+                    {group.children!.map((sub) => (
+                      <button
+                        key={sub.id}
+                        onClick={() => {
+                          sub.onClick();
+                        }}
+                        className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all text-start ${
+                          sub.isActive
+                            ? 'bg-cyan-500/20 text-cyan-300 font-semibold'
+                            : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                        }`}
+                      >
+                        <span className="truncate">{sub.label}</span>
+                        {sub.badge && sub.badge > 0 && (
+                          <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-bold text-[9px]">
+                            {sub.badge}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </div>
@@ -2915,33 +3315,96 @@ export default function Home() {
             </div>
 
             <div className="flex-1 overflow-y-auto py-4 space-y-1">
-              {menuItems.map((item) => {
-                const Icon = item.icon;
-                const isCurrent = activeTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setActiveTab(item.id);
-                      setMobileMenuOpen(false);
-                      logger.info('Mobile tab switched', { tab: item.id });
-                      if (item.id === 'my-projects' || item.id === 'projects') loadProjects();
-                    }}
-                    className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-semibold transition-all ${isCurrent
-                        ? 'nav-item-active'
-                        : 'text-slate-500 hover:text-slate-100 hover:bg-slate-700/40'
+              {mainNavTree.filter(isNavVisible).map((group) => {
+                const Icon = group.icon;
+                const hasChildren = group.children && group.children.length > 0;
+                const isExpanded = !!expandedNavGroups[group.id];
+                const isGroupActive = group.isActive || (group.children && group.children.some((c) => c.isActive));
+
+                if (!hasChildren) {
+                  return (
+                    <button
+                      key={group.id}
+                      onClick={() => {
+                        if (group.onClick) group.onClick();
+                        setMobileMenuOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                        isGroupActive
+                          ? 'nav-item-active'
+                          : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
                       }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Icon className="w-4 h-4 flex-shrink-0" strokeWidth={1.8} />
-                      <span>{item.label}</span>
-                    </div>
-                    {item.badge && item.badge > 0 && (
-                      <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-white font-bold text-[10px]">
-                        {item.badge}
-                      </span>
+                    >
+                      <div className="flex items-center gap-3">
+                        <Icon className="w-4 h-4 flex-shrink-0" strokeWidth={1.8} />
+                        <span>{group.label}</span>
+                      </div>
+                      {group.badge && group.badge > 0 && (
+                        <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px]">
+                          {group.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                }
+
+                // Has children
+                return (
+                  <div key={group.id} className="space-y-1">
+                    <button
+                      onClick={() => {
+                        setExpandedNavGroups((prev) => ({ ...prev, [group.id]: !prev[group.id] }));
+                      }}
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                        isGroupActive
+                          ? 'text-cyan-300 bg-cyan-950/30 border border-cyan-500/25'
+                          : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Icon className="w-4 h-4 flex-shrink-0" strokeWidth={1.8} />
+                        <span>{group.label}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {group.badge && group.badge > 0 && (
+                          <span className="px-1.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px]">
+                            {group.badge}
+                          </span>
+                        )}
+                        <ChevronDown
+                          className={`w-4 h-4 text-slate-400 transition-transform ${
+                            isExpanded ? 'rotate-180 text-cyan-300' : ''
+                          }`}
+                        />
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="ms-4 ps-2 border-s border-slate-700/60 space-y-1 my-1">
+                        {group.children!.map((sub) => (
+                          <button
+                            key={sub.id}
+                            onClick={() => {
+                              sub.onClick();
+                              setMobileMenuOpen(false);
+                            }}
+                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all text-start ${
+                              sub.isActive
+                                ? 'bg-cyan-500/20 text-cyan-300 font-semibold'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                            }`}
+                          >
+                            <span>{sub.label}</span>
+                            {sub.badge && sub.badge > 0 && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 font-bold text-[10px]">
+                                {sub.badge}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
                     )}
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -5389,7 +5852,11 @@ export default function Home() {
               {/* VIEW: SETTINGS & SAFE RUNTIME TELEMETRY */}
               {/* ======================================================== */}
               {activeTab === 'settings' && (
-                <div className="max-w-2xl mx-auto space-y-4">
+                <div className="max-w-5xl mx-auto space-y-6">
+                  {isAdmin && (
+                    <AdminSystemSettingsTab lang={lang} />
+                  )}
+
                   <div>
                     <h3 className="text-sm font-bold text-slate-100">{t('settingsTitle')}</h3>
                     <p className="text-xs text-slate-400">{t('settingsSubtitle')}</p>
@@ -6485,6 +6952,7 @@ export default function Home() {
                     currentUser={currentUser}
                     projects={projects}
                     lang={lang}
+                    initialCategory={docInitialCategory}
                   />
                 </div>
               )}
@@ -6533,6 +7001,7 @@ export default function Home() {
                   <OrganizationView
                     currentUser={currentUser}
                     lang={lang}
+                    initialSubTab={orgInitialSubTab}
                   />
                 </div>
               )}
@@ -7218,32 +7687,89 @@ export default function Home() {
                 : t('createTask')}
             </h3>
             <form onSubmit={handleCreateTask} className="space-y-4">
+              {/* 1. Project */}
               <div>
-                <label className="block text-xs text-slate-200 mb-1">{t('taskTitle')}</label>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">
+                  {t('navProjects')} <span className="text-rose-400">*</span>
+                </label>
+                <select
+                  value={newTaskProjectId || selectedProjectId || ''}
+                  onChange={(e) => {
+                    setNewTaskProjectId(e.target.value);
+                    setNewTaskSiteId('');
+                  }}
+                  required
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                >
+                  <option value="">{lang === 'ar' ? 'اختر المشروع...' : 'Select project...'}</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.code} - {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 2. Site */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">
+                  {lang === 'ar' ? 'الموقع الميداني (اختياري)' : 'Site (Optional)'}
+                </label>
+                <select
+                  value={newTaskSiteId}
+                  onChange={(e) => setNewTaskSiteId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                >
+                  <option value="">{lang === 'ar' ? 'كافة المواقع / عام' : 'All Sites / General'}</option>
+                  {(allSites || [])
+                    .filter((s) => !newTaskProjectId && !selectedProjectId ? true : s.projectId === (newTaskProjectId || selectedProjectId))
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.code || 'Site'})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* 3. Assignee */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">
+                  {lang === 'ar' ? 'المسند إليه (Assignee)' : 'Assign to'}
+                </label>
+                <select
+                  value={newTaskAssigneeId}
+                  onChange={(e) => setNewTaskAssigneeId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                >
+                  <option value="">
+                    {lang === 'ar' ? 'غير مسند / عام للفريق' : 'Unassigned / Team general'}
+                  </option>
+                  {userList.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.firstName} {u.lastName} ({u.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 4. Title */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">
+                  {t('taskTitle')} <span className="text-rose-400">*</span>
+                </label>
                 <input
                   type="text"
                   value={newTaskTitle}
                   onChange={(e) => setNewTaskTitle(e.target.value)}
-                  placeholder="Excavate foundation row B"
+                  placeholder={lang === 'ar' ? 'مثال: فحص لوحة التحكم الرئيسية' : 'e.g. Inspect main control panel'}
                   required
                   className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
-                <p className="text-[10px] text-slate-400 mt-1">{t('hintTaskTitle')}</p>
               </div>
 
+              {/* 5. Priority */}
               <div>
-                <label className="block text-xs text-slate-200 mb-1">{t('description')}</label>
-                <textarea
-                  value={newTaskDesc}
-                  onChange={(e) => setNewTaskDesc(e.target.value)}
-                  rows={2}
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
-                />
-                <p className="text-[10px] text-slate-400 mt-1">{t('hintTaskDesc')}</p>
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-200 mb-1">{t('priority')}</label>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">{t('priority')}</label>
                 <select
                   value={newTaskPriority}
                   onChange={(e) => setNewTaskPriority(e.target.value)}
@@ -7254,37 +7780,32 @@ export default function Home() {
                   <option value="High">{t('priorityHigh')}</option>
                   <option value="Urgent">{t('priorityUrgent')}</option>
                 </select>
-                <p className="text-[10px] text-slate-400 mt-1">{t('hintTaskPriority')}</p>
               </div>
 
-              {isAdmin && (
-                <div>
-                  <label className="block text-xs text-slate-200 mb-1">
-                    {lang === 'ar' ? 'تعيين لمستخدم' : 'Assign to'}
-                  </label>
-                  <select
-                    value={newTaskAssigneeId}
-                    onChange={(e) => setNewTaskAssigneeId(e.target.value)}
-                    required={!editingTaskId}
-                    className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
-                  >
-                    <option value="">
-                      {lang === 'ar' ? 'اختر مستخدماً...' : 'Select a user...'}
-                    </option>
-                    {userList.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.firstName} {u.lastName} ({u.email})
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[10px] text-slate-400 mt-1">{t('hintTaskAssignee')}</p>
-                  {userList.length === 0 && (
-                    <p className="text-[11px] text-amber-300 mt-1">
-                      {lang === 'ar' ? 'جاري تحميل المستخدمين...' : 'Loading users...'}
-                    </p>
-                  )}
-                </div>
-              )}
+              {/* 6. Deadline */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">
+                  {lang === 'ar' ? 'الموعد النهائي (Deadline)' : 'Deadline'}
+                </label>
+                <input
+                  type="date"
+                  value={newTaskDeadline}
+                  onChange={(e) => setNewTaskDeadline(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
+                />
+              </div>
+
+              {/* 7. Description */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">{t('description')}</label>
+                <textarea
+                  value={newTaskDesc}
+                  onChange={(e) => setNewTaskDesc(e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm resize-none"
+                  placeholder={lang === 'ar' ? 'تفاصيل إضافية عن المهمة...' : 'Additional task details...'}
+                />
+              </div>
 
               <ActionLoadingBar
                 active={taskSaving}

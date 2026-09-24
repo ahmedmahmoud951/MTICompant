@@ -122,14 +122,34 @@ public class MediaFile : FullAuditedEntity
 
     public string StorageProvider { get; set; } = "BackblazeB2";
     public string BucketName { get; set; } = string.Empty;
+    [NotMapped]
+    public string Bucket { get => BucketName; set => BucketName = value; }
+
     public string ObjectKey { get; set; } = string.Empty; // S3 Key path in B2 bucket
+    [NotMapped]
+    public string StorageKey { get => ObjectKey; set => ObjectKey = value; }
+
     public string OriginalFileName { get; set; } = string.Empty;
+    [NotMapped]
+    public string FileName { get => OriginalFileName; set => OriginalFileName = value; }
+
+    public string Extension { get; set; } = string.Empty;
+
     public string StoredFileName { get; set; } = string.Empty;
     public string ContentType { get; set; } = string.Empty;
+    [NotMapped]
+    public string MimeType { get => ContentType; set => ContentType = value; }
+
     public MediaType MediaType { get; set; } = MediaType.Other;
     public long FileSize { get; set; }
+    [NotMapped]
+    public long Size { get => FileSize; set => FileSize = value; }
+
     public string Status { get; set; } = "Uploaded"; // "Pending", "Uploaded", "Deleted"
     public string? Checksum { get; set; }
+    [NotMapped]
+    public string? Hash { get => Checksum; set => Checksum = value; }
+
     public string? ETag { get; set; }
     public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
 }

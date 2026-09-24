@@ -18,6 +18,11 @@ public class User : FullAuditedEntity
 
     public string FullName => $"{FirstName} {LastName}".Trim();
 
+    // CORE-03: User Localization Preferences
+    public string Language { get; set; } = "ar"; // "ar", "en"
+    public string DateFormat { get; set; } = "YYYY-MM-DD";
+    public string TimeFormat { get; set; } = "24h";
+
     // Navigation properties
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
@@ -198,6 +203,8 @@ public class UserPreference : BaseEntity
     public User User { get; set; } = null!;
 
     public string Language { get; set; } = "ar"; // "ar", "en"
+    public string DateFormat { get; set; } = "YYYY-MM-DD";
+    public string TimeFormat { get; set; } = "24h"; // "12h", "24h"
     public string TimeZone { get; set; } = "Africa/Cairo";
     public string Theme { get; set; } = "light"; // "light", "dark"
     public bool NotificationsEnabled { get; set; } = true;
