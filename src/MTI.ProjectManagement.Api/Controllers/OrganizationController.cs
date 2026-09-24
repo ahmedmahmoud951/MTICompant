@@ -851,6 +851,14 @@ public class OrganizationController : ControllerBase
     // 6. ORG-06: RACI Responsibility Matrix
     // ==========================================
 
+    [HttpGet("raci")]
+    public async Task<ActionResult<ApiResponse<RaciMatrixDto>>> GetRaciMatrixByQuery(
+        [FromQuery] string resourceType,
+        [FromQuery] Guid resourceId)
+    {
+        return await GetRaciMatrix(resourceType, resourceId);
+    }
+
     [HttpGet("raci/{resourceType}/{resourceId:guid}")]
     public async Task<ActionResult<ApiResponse<RaciMatrixDto>>> GetRaciMatrix(string resourceType, Guid resourceId)
     {
@@ -1036,7 +1044,8 @@ public class OrganizationController : ControllerBase
         // Tasks assigned to team members
         var teamTasks = await _context.Tasks
             .Include(t => t.Project)
-            .Where(t => memberUserIds.Contains(t.AssigneeId ?? Guid.Empty) && !t.IsDeleted)
+            .Include(t => t.AssignedToUser)
+            .Where(t => t.AssignedToUserId.HasValue && memberUserIds.Contains(t.AssignedToUserId.Value) && !t.IsDeleted)
             .OrderByDescending(t => t.CreatedAt)
             .Take(50)
             .Select(t => new
@@ -1045,12 +1054,12 @@ public class OrganizationController : ControllerBase
                 t.Title,
                 t.Status,
                 t.Priority,
-                t.AssigneeId,
-                AssigneeName = t.Assignee != null ? t.Assignee.FullName : null,
+                AssigneeId = t.AssignedToUserId,
+                AssigneeName = t.AssignedToUser != null ? t.AssignedToUser.FirstName + " " + t.AssignedToUser.LastName : null,
                 t.ProjectId,
                 ProjectName = t.Project != null ? t.Project.Name : null,
-                t.DueDate,
-                IsOverdue = t.DueDate.HasValue && t.DueDate.Value < DateTime.UtcNow && t.Status != Domain.Enums.TaskItemStatus.Completed
+                DueDate = t.DueAt,
+                IsOverdue = t.DueAt.HasValue && t.DueAt.Value < DateTime.UtcNow && t.Status != Domain.Enums.TaskItemStatus.Completed
             })
             .ToListAsync();
 
@@ -1061,8 +1070,8 @@ public class OrganizationController : ControllerBase
                 team.Id,
                 team.Name,
                 team.Code,
-                DepartmentName = team.Department.NameAr,
-                ManagerName = team.ManagerUser?.FullName,
+                DepartmentName = team.Department != null ? (!string.IsNullOrWhiteSpace(team.Department.NameAr) ? team.Department.NameAr : team.Department.NameEn) : null,
+                ManagerName = team.ManagerUser != null ? team.ManagerUser.FirstName + " " + team.ManagerUser.LastName : null,
                 MembersCount = team.Members.Count(m => m.IsActive)
             },
             AssignedProjects = assignedProjects,
@@ -1118,15 +1127,15 @@ public class OrganizationController : ControllerBase
             .ToDictionaryAsync(x => x.UserId, x => x.Count);
 
         var tasksStats = await _context.Tasks
-            .Where(t => userIds.Contains(t.AssigneeId ?? Guid.Empty) && !t.IsDeleted)
-            .GroupBy(t => t.AssigneeId!.Value)
+            .Where(t => t.AssignedToUserId.HasValue && userIds.Contains(t.AssignedToUserId.Value) && !t.IsDeleted)
+            .GroupBy(t => t.AssignedToUserId!.Value)
             .Select(g => new
             {
                 UserId = g.Key,
                 Open = g.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.Status != Domain.Enums.TaskItemStatus.Cancelled),
                 Completed = g.Count(x => x.Status == Domain.Enums.TaskItemStatus.Completed),
-                Overdue = g.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueDate.HasValue && x.DueDate.Value < now),
-                UpcomingDeadlines = g.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueDate.HasValue && x.DueDate.Value >= now && x.DueDate.Value <= now.AddDays(7))
+                Overdue = g.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueAt.HasValue && x.DueAt.Value < now),
+                UpcomingDeadlines = g.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueAt.HasValue && x.DueAt.Value >= now && x.DueAt.Value <= now.AddDays(7))
             })
             .ToDictionaryAsync(x => x.UserId, x => x);
 
@@ -1190,11 +1199,11 @@ public class OrganizationController : ControllerBase
                 .CountAsync();
 
             var teamTasks = await _context.Tasks
-                .Where(t => memberIds.Contains(t.AssigneeId ?? Guid.Empty) && !t.IsDeleted)
+                .Where(t => t.AssignedToUserId.HasValue && memberIds.Contains(t.AssignedToUserId.Value) && !t.IsDeleted)
                 .ToListAsync();
 
             var openTasks = teamTasks.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.Status != Domain.Enums.TaskItemStatus.Cancelled);
-            var overdueTasks = teamTasks.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueDate.HasValue && x.DueDate.Value < now);
+            var overdueTasks = teamTasks.Count(x => x.Status != Domain.Enums.TaskItemStatus.Completed && x.DueAt.HasValue && x.DueAt.Value < now);
             var completedTasks = teamTasks.Count(x => x.Status == Domain.Enums.TaskItemStatus.Completed);
 
             teamList.Add(new TeamWorkloadDto(
@@ -1230,7 +1239,7 @@ public class OrganizationController : ControllerBase
                 p.Teams.Count(t => t.IsActive && t.RemovedAt == null),
                 p.Tasks.Count(t => !t.IsDeleted),
                 p.Tasks.Count(t => !t.IsDeleted && t.Status != Domain.Enums.TaskItemStatus.Completed && t.Status != Domain.Enums.TaskItemStatus.Cancelled),
-                p.Tasks.Count(t => !t.IsDeleted && t.Status != Domain.Enums.TaskItemStatus.Completed && t.DueDate.HasValue && t.DueDate.Value < now),
+                p.Tasks.Count(t => !t.IsDeleted && t.Status != Domain.Enums.TaskItemStatus.Completed && t.DueAt.HasValue && t.DueAt.Value < now),
                 p.Tasks.Count(t => !t.IsDeleted && t.Status == Domain.Enums.TaskItemStatus.Completed)
             ))
             .ToListAsync();
@@ -1412,11 +1421,13 @@ public class OrganizationController : ControllerBase
             .Take(20)
             .Select(u => new SimpleUserSummaryDto(
                 u.Id,
-                u.FullName,
+                u.FirstName + " " + u.LastName,
                 u.Email,
                 u.EmployeeCode,
                 u.JobTitle,
-                u.UserProfile != null && u.UserProfile.Department != null ? u.UserProfile.Department.Name : null
+                u.UserProfile != null && u.UserProfile.Department != null
+                    ? (!string.IsNullOrWhiteSpace(u.UserProfile.Department.NameAr) ? u.UserProfile.Department.NameAr : u.UserProfile.Department.NameEn)
+                    : null
             ))
             .ToListAsync(cancellationToken);
 
@@ -1461,8 +1472,8 @@ public class OrganizationController : ControllerBase
                 t.Id,
                 t.Name,
                 t.Code,
-                t.Department.Name,
-                t.ManagerUser != null ? t.ManagerUser.FullName : null,
+                !string.IsNullOrWhiteSpace(t.Department.NameAr) ? t.Department.NameAr : t.Department.NameEn,
+                t.ManagerUser != null ? t.ManagerUser.FirstName + " " + t.ManagerUser.LastName : null,
                 t.Members.Count(m => m.IsActive && m.LeftAt == null),
                 _context.ProjectTeams.Count(pt => pt.TeamId == t.Id && pt.IsActive && pt.RemovedAt == null),
                 _context.SiteTeams.Count(st => st.TeamId == t.Id && st.IsActive && st.RemovedAt == null),

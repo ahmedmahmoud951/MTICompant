@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using MTI.ProjectManagement.Domain.Common;
 
 namespace MTI.ProjectManagement.Domain.Entities;
@@ -8,6 +9,7 @@ public class Department : FullAuditedEntity
     public string NameAr { get; set; } = string.Empty;
     public string NameEn { get; set; } = string.Empty;
     
+    [NotMapped]
     public string Name
     {
         get => !string.IsNullOrWhiteSpace(NameAr) ? NameAr : NameEn;
