@@ -24,6 +24,7 @@ class ApiClient {
 
   public clearTokens(): void {
     if (typeof window === 'undefined') return;
+    logger.log('AUTH', 'Tokens cleared from localStorage', null, 'warn');
     localStorage.removeItem('mti_access_token');
     localStorage.removeItem('mti_refresh_token');
     localStorage.removeItem('mti_user');
@@ -69,9 +70,15 @@ class ApiClient {
           response = await fetch(url, { ...options, headers });
         } else {
           this.clearTokens();
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('mti_auth_logout'));
+          }
         }
       } else {
         this.clearTokens();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('mti_auth_logout'));
+        }
       }
     }
 

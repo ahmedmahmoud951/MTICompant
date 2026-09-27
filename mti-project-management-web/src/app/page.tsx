@@ -131,6 +131,7 @@ import { resizeToProjectCover, resolveProjectCover, DEFAULT_PROJECT_COVER } from
 
 export default function Home() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -974,34 +975,55 @@ export default function Home() {
       setLang(savedLang);
       document.documentElement.dir = savedLang === 'ar' ? 'rtl' : 'ltr';
       document.documentElement.lang = savedLang;
-    }
 
-    // Stale user profile without a valid access token → force clean login
-    if (!authService.hasSession()) {
-      apiClient.clearTokens();
-      setCurrentUser(null);
-      return;
-    }
-
-    const user = authService.getCurrentUser();
-    if (!user) {
-      setCurrentUser(null);
-      return;
-    }
-
-    // Validate token with server before loading the app shell
-    (async () => {
-      const me = await authService.getMe();
-      if (!me.success || !me.data?.user) {
-        apiClient.clearTokens();
+      const handleAuthLogout = () => {
         setCurrentUser(null);
-        return;
+        setIsCheckingAuth(false);
+      };
+      window.addEventListener('mti_auth_logout', handleAuthLogout);
+
+      const handleUnload = () => {
+        logger.info('Page navigation / unload triggered');
+      };
+      window.addEventListener('beforeunload', handleUnload);
+    }
+
+    // 1. Check if user already has an active local session
+    if (!authService.hasSession()) {
+      setIsCheckingAuth(false);
+      setCurrentUser(null);
+      return;
+    }
+
+    const cachedUser = authService.getCurrentUser();
+    if (!cachedUser) {
+      setIsCheckingAuth(false);
+      setCurrentUser(null);
+      return;
+    }
+
+    // Immediately restore user session so dashboard renders instantly without delay or flash
+    setCurrentUser(cachedUser);
+    setIsCheckingAuth(false);
+    loadInitialData(cachedUser);
+    initSignalR();
+
+    // 2. Validate token in background with server (does not purge session on temporary network issues)
+    (async () => {
+      try {
+        const me = await authService.getMe();
+        if (me.success && me.data?.user) {
+          const freshUser = me.data.user;
+          localStorage.setItem('mti_user', JSON.stringify(freshUser));
+          setCurrentUser(freshUser);
+        } else if (me.message && me.message.includes('401')) {
+          logger.warn('Session expired (401), logging out.');
+          apiClient.clearTokens();
+          setCurrentUser(null);
+        }
+      } catch {
+        logger.warn('Background session check timed out or network offline, keeping cached session.');
       }
-      const freshUser = me.data.user;
-      localStorage.setItem('mti_user', JSON.stringify(freshUser));
-      setCurrentUser(freshUser);
-      loadInitialData(freshUser);
-      initSignalR();
     })();
   }, []);
 
@@ -1344,17 +1366,22 @@ export default function Home() {
     }
   };
 
-  const handleLogin = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleLogin = async (e?: React.FormEvent | React.MouseEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     setErrorMsg('');
     setLoading(true);
 
     try {
-      const res = await authService.login(email, password);
+      const res = await authService.login(email.trim(), password);
       if (res.success && res.data) {
-        setCurrentUser(res.data.user);
-        await loadInitialData(res.data.user);
-        await initSignalR();
+        const loggedUser = res.data.user;
+        setCurrentUser(loggedUser);
+        setIsCheckingAuth(false);
+        loadInitialData(loggedUser);
+        initSignalR();
       } else {
         setErrorMsg(res.message || 'Login failed. Check your credentials.');
       }
@@ -2532,6 +2559,29 @@ export default function Home() {
   };
 
   // -------------------------------------------------------------
+  // Initial Auth Check Splash — prevents login flicker on reload
+  // -------------------------------------------------------------
+  if (isCheckingAuth) {
+    return (
+      <div className="login-canvas min-h-screen flex flex-col items-center justify-center text-slate-100">
+        <div className="relative z-10 flex flex-col items-center text-center p-8">
+          <div className="login-logo-shell mb-6 animate-pulse">
+            <img
+              src="/images/CompanyLogo.png"
+              alt="MTI Engineering Solutions"
+              className="login-logo-img"
+            />
+          </div>
+          <div className="flex items-center gap-3 text-cyan-300 text-sm font-semibold tracking-wide">
+            <RefreshCw className="w-5 h-5 animate-spin" />
+            <span>{lang === 'ar' ? 'جاري التحقق من الجلسة...' : 'Verifying session...'}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
   // Unauthenticated Login Screen — cinematic mock match
   // -------------------------------------------------------------
   if (!currentUser) {
@@ -2617,7 +2667,15 @@ export default function Home() {
                   </div>
                 )}
 
-                <form className="space-y-3.5" onSubmit={handleLogin}>
+                <form
+                  className="space-y-3.5"
+                  action="javascript:void(0);"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleLogin(e);
+                  }}
+                >
                   <div className="login-field-block">
                     <div className="relative group">
                       <span className="login-field-icon login-field-icon-start">
@@ -2677,6 +2735,10 @@ export default function Home() {
 
                   <button
                     type="submit"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleLogin(e);
+                    }}
                     disabled={loading}
                     className="login-submit group w-full mt-1 py-3.5 px-4 rounded-xl text-white font-bold text-sm flex items-center justify-between disabled:opacity-60"
                   >
