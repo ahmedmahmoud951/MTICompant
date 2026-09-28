@@ -200,9 +200,9 @@ export const MasterDataCenterTab: React.FC<MasterDataCenterTabProps> = ({ curren
 
   const filteredItems = items.filter(
     (i) =>
-      i.name.toLowerCase().includes(search.toLowerCase()) ||
-      i.code.toLowerCase().includes(search.toLowerCase()) ||
-      (i.nameAr && i.nameAr.includes(search))
+      (i?.name || '').toLowerCase().includes((search || '').toLowerCase()) ||
+      (i?.code || '').toLowerCase().includes((search || '').toLowerCase()) ||
+      (i?.nameAr && i.nameAr.includes(search))
   );
 
   return (

@@ -511,8 +511,8 @@ export const PermissionsManagerTab: React.FC<PermissionsManagerTabProps> = ({ cu
             {modules.map(mod => {
               const matchingPerms = mod.permissions.filter(
                 p =>
-                  p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  p.code.toLowerCase().includes(searchQuery.toLowerCase())
+                  (p?.name || '').toLowerCase().includes((searchQuery || '').toLowerCase()) ||
+                  (p?.code || '').toLowerCase().includes((searchQuery || '').toLowerCase())
               );
 
               if (searchQuery && matchingPerms.length === 0) return null;

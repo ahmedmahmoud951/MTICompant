@@ -26,4 +26,5 @@ export * from './drawings/DrawingViewer';
 export * from './documents/DataSheetsWorkspace';
 export * from './sites/SiteWorkspace';
 export * from './projects/ProjectWorkspace';
+export * from './workspace/MyWorkspaceView';
 

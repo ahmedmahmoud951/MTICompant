@@ -51,7 +51,8 @@ import {
   DrawingsWorkspace,
   DataSheetsWorkspace,
   SiteWorkspace,
-  ProjectWorkspace
+  ProjectWorkspace,
+  MyWorkspaceView
 } from '@/features';
 import { GlobalSearchModal } from '@/components/GlobalSearchModal';
 import { ActivityTimeline } from '@/components/ActivityTimeline';
@@ -553,12 +554,27 @@ export default function Home() {
 
   useEffect(() => {
     if (!currentUser) return;
-    if (activeTab === 'reports-archive' || activeTab === 'reports') {
+    if (activeTab) {
+      logger.info(
+        `[Navigation] Active Tab: "${activeTab}" | User: ${currentUser.fullName || currentUser.email} (${currentUser.roles?.join(', ') || 'User'})`
+      );
+    }
+    if (activeTab === 'my-workspace' || activeTab === 'reports-archive' || activeTab === 'reports') {
+      dataRecordService.getApprovedRecords().then((recs) => {
+        setApprovedRecords(recs);
+        logger.info(`[Records] Loaded ${recs.length} approved records`);
+      }).catch(() => { });
+    }
+    if (activeTab === 'my-workspace' || activeTab === 'approvals' || activeTab === 'project-data' || activeTab === 'my-data') {
+      dataRecordService.getPendingApprovals().then((recs) => {
+        setPendingRecords(recs);
+        logger.info(`[Records] Loaded ${recs.length} pending approvals`);
+      }).catch(() => { });
       dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => { });
     }
-    if (activeTab === 'approvals' || activeTab === 'project-data' || activeTab === 'my-data') {
-      dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => { });
-      dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => { });
+    if (activeTab === 'my-workspace') {
+      loadAllSites();
+      loadTasks();
     }
   }, [activeTab, currentUser]);
 
@@ -1399,16 +1415,42 @@ export default function Home() {
     setChatMessages([]);
   };
 
+  const loadTasks = async () => {
+    try {
+      const data = await taskService.getTasks();
+      const list = data || [];
+      setTasks(list);
+      logger.info(`[Tasks] Loaded ${list.length} tasks across enterprise`);
+    } catch (e) {
+      console.error(e);
+      logger.error('[Tasks] Failed to load tasks', e);
+    }
+  };
+
+  const loadNotifications = async () => {
+    try {
+      const res = await notificationService.getNotifications();
+      const items = res.items || [];
+      setNotificationsList(items);
+      logger.info(`[Notifications] Loaded ${items.length} notifications`);
+    } catch (e) {
+      console.error(e);
+      logger.error('[Notifications] Failed to load notifications', e);
+    }
+  };
+
   const loadProjects = async () => {
     try {
       const res = await projectService.getProjects();
       const items = res.data?.items || [];
       setProjects(items);
+      logger.info(`[Projects] Loaded ${items.length} projects successfully`);
       if (items.length > 0 && !selectedProjectId) {
         selectProject(items[0].id);
       }
     } catch (e) {
       console.error(e);
+      logger.error('[Projects] Failed to load projects', e);
     }
   };
 
@@ -1420,13 +1462,17 @@ export default function Home() {
     setSelectedProjectId(projId);
     signalRService.joinProject(projId).catch(() => { });
     setLoadingSites(true);
+    logger.info(`[Project Scope] Selected project ID: ${projId}`);
     try {
       const res = await projectService.getProjectSites(projId);
-      setSelectedProjectSites(res.data || []);
+      const sitesList = res.data || [];
+      setSelectedProjectSites(sitesList);
+      logger.info(`[Project Scope] Loaded ${sitesList.length} sites for project: ${projId}`);
       if (activeTab === 'technical-office') loadTechnicalOfficeData(projId);
       if (activeTab === 'governance') loadGovernanceData(projId);
     } catch (e) {
       console.error(e);
+      logger.error(`[Project Scope] Failed to load sites for project ${projId}`, e);
     } finally {
       setLoadingSites(false);
     }
@@ -1436,10 +1482,13 @@ export default function Home() {
     setLoadingAllSites(true);
     try {
       const res = await siteService.getAllSites();
-      setAllSites(res.data || []);
+      const sitesList = res.data || [];
+      setAllSites(sitesList);
+      logger.info(`[Sites] Loaded ${sitesList.length} total sites`);
     } catch (e) {
       console.error(e);
       setAllSites([]);
+      logger.error('[Sites] Failed to load all sites', e);
     } finally {
       setLoadingAllSites(false);
     }
@@ -2817,27 +2866,83 @@ export default function Home() {
       onClick: () => setActiveTab('dashboard')
     },
 
-    // 2. My Workspace
+    // 2. My Workspace (Personal Cockpit)
     {
-      id: 'my-workspace',
+      id: 'my-workspace-group',
       label: lang === 'ar' ? 'مساحة عملي' : 'My Workspace',
       icon: Layers,
-      isActive: activeTab === 'my-projects' || activeTab === 'my-tasks' || activeTab === 'my-sites' || activeTab === 'my-data',
-      onClick: () => {
-        if (isAdmin) {
-          setActiveTab('dashboard');
-        } else {
-          setActiveTab('my-projects');
+      isActive:
+        activeTab === 'my-workspace' ||
+        activeTab === 'my-projects' ||
+        activeTab === 'my-tasks' ||
+        activeTab === 'my-sites' ||
+        activeTab === 'my-data',
+      onClick: () => setActiveTab('my-workspace'),
+      children: [
+        {
+          id: 'my-ws-home',
+          label: lang === 'ar' ? 'لوحة مساحة عملي' : 'Workspace Cockpit',
+          isActive: activeTab === 'my-workspace',
+          onClick: () => setActiveTab('my-workspace')
+        },
+        {
+          id: 'my-ws-projects',
+          label: lang === 'ar' ? 'مشاريعي المسندة' : 'My Projects',
+          isActive: activeTab === 'my-projects',
+          onClick: () => {
+            setActiveTab('my-projects');
+            loadProjects();
+          }
+        },
+        {
+          id: 'my-ws-sites',
+          label: lang === 'ar' ? 'مواقعي الميدانية' : 'My Sites',
+          isActive: activeTab === 'my-sites',
+          onClick: () => setActiveTab('my-sites')
+        },
+        {
+          id: 'my-ws-tasks',
+          label: lang === 'ar' ? 'مهامي الشخصية' : 'My Tasks',
+          isActive: activeTab === 'my-tasks',
+          onClick: () => {
+            setTaskFilterContext('my');
+            setActiveTab('my-tasks');
+          }
+        },
+        {
+          id: 'my-ws-data',
+          label: lang === 'ar' ? 'سجلاتي وبياناتي المرفوعة' : 'My Submissions',
+          isActive: activeTab === 'my-data',
+          onClick: () => setActiveTab('my-data')
         }
-      }
+      ]
     },
 
-    // 3. Projects (All Projects, My Projects, Project Tasks)
+    // 3. Approvals & Reviews Center
+    {
+      id: 'approvals',
+      label: lang === 'ar' ? 'مركز الاعتمادات والموافقات' : 'Approvals Center',
+      icon: FileCheck,
+      badge: pendingRecords.length || undefined,
+      isActive: activeTab === 'approvals',
+      onClick: () => {
+        setActiveTab('approvals');
+        dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => {});
+      },
+      requiredRole: ['Admin', 'SuperAdmin', 'SystemAdmin', 'ProjectManager']
+    },
+
+    // 4. Projects (All Projects, My Projects, Milestones, Governance, Tasks)
     {
       id: 'projects-group',
       label: t('navProjects'),
       icon: FolderKanban,
-      isActive: activeTab === 'projects' || activeTab === 'my-projects' || (activeTab === 'tasks' && taskFilterContext === 'all'),
+      isActive:
+        activeTab === 'projects' ||
+        activeTab === 'my-projects' ||
+        activeTab === 'milestones' ||
+        activeTab === 'governance' ||
+        (activeTab === 'tasks' && taskFilterContext === 'all'),
       children: [
         {
           id: 'all-projects',
@@ -2858,6 +2963,18 @@ export default function Home() {
           }
         },
         {
+          id: 'project-milestones',
+          label: lang === 'ar' ? 'المعالم والجدول الزمني' : 'Milestones & Roadmap',
+          isActive: activeTab === 'milestones',
+          onClick: () => setActiveTab('milestones')
+        },
+        {
+          id: 'project-governance',
+          label: lang === 'ar' ? 'حوكمة ومخاطر المشاريع' : 'Governance & Risks',
+          isActive: activeTab === 'governance',
+          onClick: () => setActiveTab('governance')
+        },
+        {
           id: 'project-tasks',
           label: lang === 'ar' ? 'مهام المشاريع' : 'Project Tasks',
           isActive: activeTab === 'tasks' && taskFilterContext === 'all',
@@ -2869,16 +2986,21 @@ export default function Home() {
       ]
     },
 
-    // 4. Sites (All Sites, My Sites, Site Tasks)
+    // 5. Field Sites & Operations (Sites, Operations, Daily Reports, Data Hub)
     {
       id: 'sites-group',
-      label: t('navSites'),
+      label: lang === 'ar' ? 'المواقع والعمليات الميدانية' : 'Sites & Operations',
       icon: MapPin,
-      isActive: activeTab === 'sites' || activeTab === 'my-sites',
+      isActive:
+        activeTab === 'sites' ||
+        activeTab === 'my-sites' ||
+        activeTab === 'operations' ||
+        activeTab === 'daily-reports' ||
+        activeTab === 'project-data',
       children: [
         {
           id: 'all-sites',
-          label: lang === 'ar' ? 'جميع المواقع' : 'All Sites',
+          label: lang === 'ar' ? 'جميع المواقع الميدانية' : 'All Field Sites',
           isActive: activeTab === 'sites',
           onClick: () => setActiveTab('sites')
         },
@@ -2889,18 +3011,27 @@ export default function Home() {
           onClick: () => setActiveTab('my-sites')
         },
         {
-          id: 'site-tasks',
-          label: lang === 'ar' ? 'مهام المواقع' : 'Site Tasks',
-          isActive: activeTab === 'tasks' && taskFilterContext === 'all',
-          onClick: () => {
-            setTaskFilterContext('all');
-            setActiveTab('tasks');
-          }
+          id: 'site-operations',
+          label: lang === 'ar' ? 'العمليات الميدانية والأنشطة' : 'Site Operations',
+          isActive: activeTab === 'operations',
+          onClick: () => setActiveTab('operations')
+        },
+        {
+          id: 'daily-reports',
+          label: t('navDailyReports'),
+          isActive: activeTab === 'daily-reports',
+          onClick: () => setActiveTab('daily-reports')
+        },
+        {
+          id: 'site-data-hub',
+          label: lang === 'ar' ? 'مركز رفع وتدقيق البيانات' : 'Site Data Hub',
+          isActive: activeTab === 'project-data',
+          onClick: () => setActiveTab('project-data')
         }
       ]
     },
 
-    // 5. Tasks (My Tasks, Team Tasks, All Tasks)
+    // 6. Tasks (My Tasks, Team Tasks, All Tasks)
     {
       id: 'tasks-group',
       label: t('navTasks'),
@@ -2938,21 +3069,69 @@ export default function Home() {
       ]
     },
 
-    // 6. Documents (Project Documents, Site Documents, Technical Office, Accounting, Drawings, Daily Reports, Data Sheets)
+    // 7. Technical Office & Drawings
+    {
+      id: 'tech-office-group',
+      label: lang === 'ar' ? 'المكتب الفني والمخططات' : 'Technical Office & Drawings',
+      icon: Briefcase,
+      isActive:
+        activeTab === 'technical-office' ||
+        activeTab === 'drawings' ||
+        activeTab === 'datasheets',
+      requiredRole: ['TechnicalOffice', 'Admin', 'SystemAdmin', 'ProjectManager'],
+      children: [
+        {
+          id: 'to-dashboard',
+          label: lang === 'ar' ? 'لوحة المكتب الفني (عروض، مناقصات، فواتير)' : 'Technical Office Hub',
+          isActive: activeTab === 'technical-office',
+          onClick: () => setActiveTab('technical-office')
+        },
+        {
+          id: 'to-drawings',
+          label: lang === 'ar' ? 'المخططات الهندسية CAD/PDF' : 'Engineering Drawings',
+          isActive: activeTab === 'drawings',
+          onClick: () => setActiveTab('drawings')
+        },
+        {
+          id: 'to-datasheets',
+          label: lang === 'ar' ? 'لوائح البيانات الفنية المعتمدة' : 'Approved Data Sheets',
+          isActive: activeTab === 'datasheets',
+          onClick: () => setActiveTab('datasheets')
+        }
+      ]
+    },
+
+    // 8. Materials & Company Assets
+    {
+      id: 'materials-assets',
+      label: lang === 'ar' ? 'المواد والأصول والمستودعات' : 'Materials & Company Assets',
+      icon: Package,
+      isActive: activeTab === 'materials-assets',
+      onClick: () => setActiveTab('materials-assets'),
+      requiredRole: ['Admin', 'SuperAdmin', 'SystemAdmin', 'ProjectManager', 'Procurement', 'Maintenance']
+    },
+
+    // 9. Accounting & Financial Management
+    {
+      id: 'accounting-group',
+      label: t('navAccounting'),
+      icon: DollarSign,
+      isActive: activeTab === 'accounting',
+      onClick: () => setActiveTab('accounting'),
+      requiredRole: ['Admin', 'SuperAdmin', 'SystemAdmin', 'Accounting', 'ProjectManager']
+    },
+
+    // 10. Documents & Cloud Archive (B2 Storage)
     {
       id: 'documents-group',
       label: t('navDocuments'),
       icon: FileText,
       isActive:
-        activeTab === 'documents' ||
-        activeTab === 'drawings' ||
-        activeTab === 'datasheets' ||
-        activeTab === 'accounting' ||
-        activeTab === 'daily-reports',
+        activeTab === 'documents',
       children: [
         {
-          id: 'doc-project',
-          label: lang === 'ar' ? 'مستندات المشاريع' : 'Project Documents',
+          id: 'doc-all',
+          label: lang === 'ar' ? 'الأرشيف السحابي الشامل' : 'All Cloud Documents',
           isActive: activeTab === 'documents' && docInitialCategory === 'All',
           onClick: () => {
             setDocInitialCategory('All');
@@ -2961,7 +3140,7 @@ export default function Home() {
         },
         {
           id: 'doc-site',
-          label: lang === 'ar' ? 'مستندات المواقع' : 'Site Documents',
+          label: lang === 'ar' ? 'مستندات المواقع الميدانية' : 'Site Documents',
           isActive: activeTab === 'documents' && docInitialCategory === 'SiteDocuments',
           onClick: () => {
             setDocInitialCategory('SiteDocuments');
@@ -2979,68 +3158,48 @@ export default function Home() {
         },
         {
           id: 'doc-accounting',
-          label: t('navAccounting'),
-          isActive: activeTab === 'accounting' || (activeTab === 'documents' && docInitialCategory === 'Accounting'),
+          label: lang === 'ar' ? 'مستندات الحسابات والمالية' : 'Accounting Documents',
+          isActive: activeTab === 'documents' && docInitialCategory === 'Accounting',
           onClick: () => {
-            setActiveTab('accounting');
-          }
-        },
-        {
-          id: 'doc-drawings',
-          label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings',
-          isActive: activeTab === 'drawings' || (activeTab === 'documents' && docInitialCategory === 'Drawings'),
-          onClick: () => {
-            setActiveTab('drawings');
-          }
-        },
-        {
-          id: 'doc-daily-reports',
-          label: t('navDailyReports'),
-          isActive: activeTab === 'daily-reports' || (activeTab === 'documents' && docInitialCategory === 'DailyReports'),
-          onClick: () => {
-            setActiveTab('daily-reports');
-          }
-        },
-        {
-          id: 'doc-datasheets',
-          label: lang === 'ar' ? 'لوائح البيانات الفنية' : 'Data Sheets',
-          isActive: activeTab === 'datasheets' || (activeTab === 'documents' && docInitialCategory === 'DataSheets'),
-          onClick: () => {
-            setActiveTab('datasheets');
+            setDocInitialCategory('Accounting');
+            setActiveTab('documents');
           }
         }
       ]
     },
 
-    // 7. Technical Office
+    // 11. Reports & Analytics
     {
-      id: 'technical-office',
-      label: t('navTechnicalOffice'),
-      icon: Briefcase,
-      isActive: activeTab === 'technical-office',
-      onClick: () => setActiveTab('technical-office'),
-      requiredRole: ['TechnicalOffice', 'Admin', 'SystemAdmin', 'ProjectManager']
-    },
-
-    // 8. Drawings
-    {
-      id: 'drawings',
-      label: lang === 'ar' ? 'المخططات الهندسية' : 'Drawings',
-      icon: Compass,
-      isActive: activeTab === 'drawings',
-      onClick: () => setActiveTab('drawings')
-    },
-
-    // 9. Reports
-    {
-      id: 'reports',
+      id: 'reports-group',
       label: t('navReports'),
       icon: BarChart3,
       isActive: activeTab === 'reports' || activeTab === 'reports-archive',
-      onClick: () => setActiveTab('reports')
+      children: [
+        {
+          id: 'rep-overview',
+          label: lang === 'ar' ? 'تقارير وتحليلات المنظومة' : 'Reports & Analytics',
+          isActive: activeTab === 'reports',
+          onClick: () => setActiveTab('reports')
+        },
+        {
+          id: 'rep-archive',
+          label: lang === 'ar' ? 'أرشيف التقارير والاعتمادات' : 'Reports Archive',
+          isActive: activeTab === 'reports-archive',
+          onClick: () => setActiveTab('reports-archive')
+        }
+      ]
     },
 
-    // 10. Chat
+    // 12. Activity Timeline (Audit & Operations Log)
+    {
+      id: 'activity-timeline',
+      label: lang === 'ar' ? 'سجل العمليات والأنشطة' : 'Activity Center',
+      icon: Activity,
+      isActive: activeTab === 'activity',
+      onClick: () => setActiveTab('activity')
+    },
+
+    // 13. Chat Hub
     {
       id: 'chat',
       label: t('navChat'),
@@ -3050,7 +3209,7 @@ export default function Home() {
       onClick: () => setActiveTab('chat')
     },
 
-    // 11. Notifications
+    // 14. Notifications Hub
     {
       id: 'notifications',
       label: t('navNotifications'),
@@ -3060,7 +3219,7 @@ export default function Home() {
       onClick: () => setActiveTab('notifications')
     },
 
-    // 12. Organization (Departments, Teams, Employees)
+    // 15. Organization (Departments, Teams, Employees)
     {
       id: 'organization-group',
       label: t('navOrganization'),
@@ -3098,7 +3257,7 @@ export default function Home() {
       ]
     },
 
-    // 13. Administration (Users, Roles, Permissions, Master Data, Audit Logs, System Settings)
+    // 16. Administration (Users, Roles, Permissions, Master Data, Audit Logs, System Settings)
     {
       id: 'admin-group',
       label: lang === 'ar' ? 'الإدارة والتحكم' : 'Administration',
@@ -3249,6 +3408,9 @@ export default function Home() {
                       setExpandedNavGroups((prev) => ({ ...prev, [group.id]: true }));
                     } else {
                       setExpandedNavGroups((prev) => ({ ...prev, [group.id]: !prev[group.id] }));
+                    }
+                    if (group.onClick) {
+                      group.onClick();
                     }
                   }}
                   className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
@@ -3416,6 +3578,10 @@ export default function Home() {
                     <button
                       onClick={() => {
                         setExpandedNavGroups((prev) => ({ ...prev, [group.id]: !prev[group.id] }));
+                        if (group.onClick) {
+                          group.onClick();
+                          setMobileMenuOpen(false);
+                        }
                       }}
                       className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                         isGroupActive
@@ -3866,6 +4032,55 @@ export default function Home() {
               )}
 
               {/* ======================================================== */}
+              {/* VIEW: MY WORKSPACE (PERSONAL COCKPIT) */}
+              {/* ======================================================== */}
+              {activeTab === 'my-workspace' && (
+                <MyWorkspaceView
+                  currentUser={currentUser}
+                  projects={projects}
+                  allSites={allSites}
+                  tasks={tasks}
+                  pendingRecords={pendingRecords}
+                  approvedRecords={approvedRecords}
+                  totalUnreadMessages={totalUnreadMessages}
+                  unreadNotificationsCount={notificationsList.filter((n) => !n.isRead).length}
+                  lang={lang}
+                  onNavigateTab={(tab) => {
+                    logger.info(`[MyWorkspace] Navigating to tab: "${tab}"`);
+                    setActiveTab(tab);
+                  }}
+                  onEnterProjectWorkspace={(proj) => {
+                    selectProject(proj.id);
+                    setActiveWorkspaceProject(proj);
+                    setActiveTab('projects');
+                  }}
+                  onEnterSiteWorkspace={(site) => {
+                    setActiveWorkspaceSite(site);
+                    setActiveTab('sites');
+                  }}
+                  onOpenNewTaskModal={() => setShowNewTaskModal(true)}
+                  onToggleTaskStatus={async (task) => {
+                    const nextStatus = task.status === 'Completed' ? 'InProgress' : 'Completed';
+                    try {
+                      await taskService.updateStatus(task.id, nextStatus as any);
+                      logger.success(`[Task] Status changed to ${nextStatus} for task: "${task.title}"`);
+                      loadTasks();
+                    } catch (err: any) {
+                      logger.error('[Task] Failed to update status:', err);
+                    }
+                  }}
+                  onRefresh={() => {
+                    loadProjects();
+                    loadAllSites();
+                    loadTasks();
+                    dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => {});
+                    dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => {});
+                    loadNotifications();
+                  }}
+                />
+              )}
+
+              {/* ======================================================== */}
               {/* VIEW: PROJECTS / MY PROJECTS (UX-02 Project Workspace) */}
               {/* ======================================================== */}
               {(activeTab === 'projects' || activeTab === 'my-projects') && (
@@ -4278,7 +4493,7 @@ export default function Home() {
               {/* ======================================================== */}
               {/* VIEW: APPROVALS (Prompt 14 & 20) */}
               {/* ======================================================== */}
-              {activeTab === 'approvals' && isAdmin && (
+              {activeTab === 'approvals' && (isAdmin || (currentUser.roles || []).includes('ProjectManager')) && (
                 <div className="space-y-4">
                   <div className="glow-card p-4 rounded-2xl flex items-center justify-between gap-3">
                     <div>
@@ -7168,28 +7383,21 @@ export default function Home() {
             <span className="text-[10px] leading-tight">{lang === 'ar' ? 'البيانات' : 'Data'}</span>
           </button>
 
-          {/* 3. Reports Archive */}
+          {/* 3. My Workspace */}
           <button
             type="button"
             onClick={() => {
-              setActiveTab('reports-archive');
+              setActiveTab('my-workspace');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all relative ${
-              activeTab === 'reports-archive'
-                ? 'text-emerald-400 font-bold bg-emerald-500/15'
+            className={`flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all ${
+              activeTab === 'my-workspace'
+                ? 'text-cyan-300 font-bold bg-cyan-500/15'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <div className="relative">
-              <ShieldCheck className="w-5 h-5 mb-0.5 text-emerald-400" />
-              {approvedRecords.length > 0 && (
-                <span className="absolute -top-1 -end-2 px-1 rounded-full bg-emerald-500 text-slate-950 font-bold text-[9px] leading-tight">
-                  {approvedRecords.length}
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] leading-tight">{lang === 'ar' ? 'الأرشيف' : 'Archive'}</span>
+            <Layers className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] leading-tight">{lang === 'ar' ? 'مساحة عملي' : 'Workspace'}</span>
           </button>
 
           {/* 4. Chat */}
