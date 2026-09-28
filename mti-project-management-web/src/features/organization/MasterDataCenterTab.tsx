@@ -27,6 +27,29 @@ interface MasterDataCenterTabProps {
 export const MasterDataCenterTab: React.FC<MasterDataCenterTabProps> = ({ currentUser, lang }) => {
   const isArabic = lang === 'ar';
 
+  const CATEGORY_NAMES_AR: Record<string, string> = {
+    DepartmentType: 'أنواع الأقسام الإدارية',
+    SiteType: 'أنواع المواقع والمحطات الميدانية',
+    ProjectStatus: 'حالات المشاريع',
+    ProjectType: 'تصنيفات ومجالات المشاريع',
+    TaskPriority: 'أولويات المهام',
+    SeverityLevel: 'مستويات الخطورة',
+    UnitOfMeasure: 'وحدات القياس الهندسية',
+    RoleType: 'أنواع الأدوار الوظيفية',
+    SkillType: 'المهارات والتخصصات',
+    CertificationType: 'الشهادات والاعتمادات',
+    DocumentCategory: 'تصنيفات الوثائق والمستندات',
+    ContractType: 'أنواع العقود والمناقصات',
+    Currency: 'العملات المالية المعتمدة'
+  };
+
+  const getCategoryLabel = (cat: MasterDataCategory) => {
+    if (isArabic) {
+      return CATEGORY_NAMES_AR[cat.category] || cat.displayName || cat.category;
+    }
+    return cat.displayName || cat.category;
+  };
+
   const [categories, setCategories] = useState<MasterDataCategory[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [items, setItems] = useState<MasterDataItem[]>([]);
@@ -270,7 +293,7 @@ export const MasterDataCenterTab: React.FC<MasterDataCenterTabProps> = ({ curren
                   }`}
                 >
                   <div className="truncate">
-                    <span className="text-xs font-bold block truncate">{cat.displayName}</span>
+                    <span className="text-xs font-bold block truncate">{getCategoryLabel(cat)}</span>
                     <span className="text-[10px] text-slate-500 font-mono">{cat.category}</span>
                   </div>
                   <span
@@ -420,7 +443,7 @@ export const MasterDataCenterTab: React.FC<MasterDataCenterTabProps> = ({ curren
                   required
                   value={code}
                   onChange={(e) => setCode(e.target.value.replace(/[^A-Za-z0-9_-]/g, ''))}
-                  placeholder="e.g. SiteEngineer, FireAlarm"
+                  placeholder={isArabic ? 'مثال: ENG_SITE أو MAT_CABLE' : 'e.g. ENG_SITE or MAT_CABLE'}
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 font-mono text-xs"
                 />
               </div>
@@ -434,7 +457,7 @@ export const MasterDataCenterTab: React.FC<MasterDataCenterTabProps> = ({ curren
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Site Engineer"
+                  placeholder="e.g. Senior Site Engineer"
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs"
                 />
               </div>
@@ -447,7 +470,7 @@ export const MasterDataCenterTab: React.FC<MasterDataCenterTabProps> = ({ curren
                   type="text"
                   value={nameAr}
                   onChange={(e) => setNameAr(e.target.value)}
-                  placeholder="مثال: مهندس موقع"
+                  placeholder="مثال: مهندس موقع ميداني أول"
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs font-arabic"
                 />
               </div>

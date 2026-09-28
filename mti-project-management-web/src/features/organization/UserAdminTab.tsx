@@ -85,6 +85,25 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
     'Viewer'
   ];
 
+  const ROLE_NAMES_MAP: Record<string, { ar: string; en: string }> = {
+    SuperAdmin: { ar: 'المدير العام', en: 'Super Admin' },
+    SystemAdmin: { ar: 'مسؤول النظام', en: 'System Admin' },
+    Admin: { ar: 'مدير المنظومة', en: 'Enterprise Admin' },
+    ProjectManager: { ar: 'مدير مشاريع', en: 'Project Manager' },
+    Engineer: { ar: 'مهندس ميداني', en: 'Field Engineer' },
+    SiteEngineer: { ar: 'مهندس موقع', en: 'Site Engineer' },
+    SoftwareEngineer: { ar: 'مهندس برمجيات ونظم', en: 'Software Engineer' },
+    TechnicalOffice: { ar: 'المكتب الفني', en: 'Technical Office' },
+    Accounting: { ar: 'الحسابات والمالية', en: 'Accounting' },
+    Procurement: { ar: 'المشتريات وسلاسل الإمداد', en: 'Procurement' },
+    Maintenance: { ar: 'الصيانة والتشغيل', en: 'Maintenance' },
+    Viewer: { ar: 'مشاهد ومطلع فقط', en: 'Viewer' }
+  };
+
+  const getRoleLabel = (r: string) => {
+    return isArabic ? (ROLE_NAMES_MAP[r]?.ar || r) : (ROLE_NAMES_MAP[r]?.en || r);
+  };
+
   useEffect(() => {
     loadUsers();
     loadDepartmentsAndTeams();
@@ -397,7 +416,7 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
                             key={r}
                             className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-300 border border-indigo-500/20"
                           >
-                            {r}
+                            {getRoleLabel(r)}
                           </span>
                         ))}
                       </div>
@@ -526,7 +545,7 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
                     type="text"
                     value={formEmployeeCode}
                     onChange={(e) => setFormEmployeeCode(e.target.value)}
-                    placeholder="e.g. MTI-ENG-042"
+                    placeholder={isArabic ? 'مثال: MTI-ENG-042' : 'e.g. MTI-ENG-042'}
                     className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 font-mono text-xs"
                   />
                 </div>
@@ -538,6 +557,7 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
                     type="text"
                     value={formPhone}
                     onChange={(e) => setFormPhone(e.target.value)}
+                    placeholder={isArabic ? 'مثال: 01012345678' : 'e.g. +20 101 234 5678'}
                     className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs"
                   />
                 </div>
@@ -552,7 +572,7 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
                     type="text"
                     value={formJobTitle}
                     onChange={(e) => setFormJobTitle(e.target.value)}
-                    placeholder="e.g. Senior CCTV Engineer"
+                    placeholder={isArabic ? 'مثال: مهندس اتصالات وتحكم أول' : 'e.g. Senior Telecom & Control Engineer'}
                     className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs"
                   />
                   <span className="text-[10px] text-slate-500 block mt-0.5">
@@ -596,7 +616,7 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
                             : 'bg-slate-700/60 text-slate-300 hover:bg-slate-700'
                         }`}
                       >
-                        {r}
+                        {getRoleLabel(r)}
                       </button>
                     );
                   })}
@@ -611,7 +631,7 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
                   type="password"
                   value={formPassword}
                   onChange={(e) => setFormPassword(e.target.value)}
-                  placeholder="Defaults to Mti@2026Secure!"
+                  placeholder={isArabic ? 'الافتراضي: Mti@2026Secure!' : 'Defaults to: Mti@2026Secure!'}
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs"
                 />
               </div>
@@ -753,7 +773,7 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
                             : 'bg-slate-700/60 text-slate-300 hover:bg-slate-700'
                         }`}
                       >
-                        {r}
+                        {getRoleLabel(r)}
                       </button>
                     );
                   })}
@@ -809,7 +829,7 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Min 8 characters with numbers & symbols"
+                  placeholder={isArabic ? '8 خانات على الأقل تشمل أرقاماً ورموزاً' : 'Min 8 characters with numbers & symbols'}
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs"
                 />
               </div>

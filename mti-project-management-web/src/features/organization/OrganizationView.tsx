@@ -585,7 +585,7 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
                   value={newTeamCode}
                   onChange={(e) => setNewTeamCode(e.target.value)}
                   required
-                  placeholder="e.g. TM-SOFT-01"
+                  placeholder={isArabic ? 'مثال: TM-CCTV-01' : 'e.g. TM-CCTV-01'}
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200"
                 />
               </div>
@@ -597,7 +597,7 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
                   value={newTeamName}
                   onChange={(e) => setNewTeamName(e.target.value)}
                   required
-                  placeholder={isArabic ? 'مثال: فريق تطوير البنية التحتية والشبكات' : 'e.g. Infrastructure & Networking Team'}
+                  placeholder={isArabic ? 'مثال: فريق أنظمة المراقبة والتحكم الميداني' : 'e.g. CCTV & Control Systems Field Team'}
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200"
                 />
               </div>
@@ -608,6 +608,7 @@ export const OrganizationView: React.FC<OrganizationViewProps> = ({ currentUser,
                   value={newTeamDesc}
                   onChange={(e) => setNewTeamDesc(e.target.value)}
                   rows={2}
+                  placeholder={isArabic ? 'وصف اختصاصات الفريق والمهام الميدانية المسندة إليه...' : 'Description of team scope and field assignments...'}
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200"
                 />
               </div>

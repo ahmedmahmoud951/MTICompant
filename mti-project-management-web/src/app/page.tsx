@@ -7579,7 +7579,7 @@ export default function Home() {
                             type="text"
                             value={newCode}
                             onChange={(e) => setNewCode(e.target.value)}
-                            placeholder="PRJ-2026-ALEX"
+                            placeholder={lang === 'ar' ? 'مثال: PRJ-2026-CAIRO' : 'e.g. PRJ-2026-CAIRO'}
                             required
                             className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-600/50 rounded-xl text-white text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition"
                           />
@@ -7594,7 +7594,7 @@ export default function Home() {
                             type="text"
                             value={newName}
                             onChange={(e) => setNewName(e.target.value)}
-                            placeholder="Alexandria Port Hub"
+                            placeholder={lang === 'ar' ? 'مثال: مشروع تطوير منظومة المراقبة والتحكم' : 'e.g. Central Surveillance & Control Upgrade'}
                             required
                             className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-600/50 rounded-xl text-white text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition"
                           />
@@ -7607,7 +7607,7 @@ export default function Home() {
                             type="text"
                             value={newClient}
                             onChange={(e) => setNewClient(e.target.value)}
-                            placeholder="Port Authority / العميل"
+                            placeholder={lang === 'ar' ? 'مثال: هيئة ميناء الإسكندرية / شركة بترول' : 'e.g. Alexandria Port Authority / Petroleum Co.'}
                             className="w-full px-3.5 py-2.5 bg-slate-900/80 border border-slate-600/50 rounded-xl text-white text-sm focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400 transition"
                           />
                           <p className="text-[10px] text-slate-400 mt-1">{t('hintClientName')}</p>
@@ -7878,7 +7878,7 @@ export default function Home() {
                   value={siteCode}
                   onChange={(e) => setSiteCode(e.target.value)}
                   required
-                  placeholder="SITE-A1"
+                  placeholder={lang === 'ar' ? 'مثال: SITE-ALEX-01' : 'e.g. SITE-ALEX-01'}
                   className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">{t('hintSiteCode')}</p>
@@ -7890,6 +7890,7 @@ export default function Home() {
                   value={siteName}
                   onChange={(e) => setSiteName(e.target.value)}
                   required
+                  placeholder={lang === 'ar' ? 'مثال: محطة الضخ المركزية — قطاع أ' : 'e.g. Central Pumping Station — Sector A'}
                   className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">{t('hintSiteName')}</p>
@@ -7900,6 +7901,7 @@ export default function Home() {
                   type="text"
                   value={siteAddress}
                   onChange={(e) => setSiteAddress(e.target.value)}
+                  placeholder={lang === 'ar' ? 'مثال: الكيلو 21 طريق الإسكندرية الصحراوي' : 'e.g. KM 21 Alexandria Desert Road'}
                   className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                 />
                 <p className="text-[10px] text-slate-400 mt-1">{t('hintSiteAddress')}</p>
@@ -8417,7 +8419,7 @@ export default function Home() {
                     type="text"
                     value={boqItemCode}
                     onChange={(e) => setBoqItemCode(e.target.value)}
-                    placeholder="BOQ-CCTV-01"
+                    placeholder={lang === 'ar' ? 'مثال: BOQ-CCTV-01' : 'e.g. BOQ-CCTV-01'}
                     required
                     className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                   />
@@ -8444,7 +8446,7 @@ export default function Home() {
                   onChange={(e) => setBoqDesc(e.target.value)}
                   rows={2}
                   required
-                  placeholder="Hikvision 4MP IP Dome Camera with IR..."
+                  placeholder={lang === 'ar' ? 'مثال: توريد وتركيب كاميرات مراقبة شبكية 4 ميجابكسل مع رؤية ليلية...' : 'e.g. Supply and install 4MP IP Dome Cameras with IR...'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -8456,7 +8458,7 @@ export default function Home() {
                     type="text"
                     value={boqUnit}
                     onChange={(e) => setBoqUnit(e.target.value)}
-                    placeholder="Unit / Meter"
+                    placeholder={lang === 'ar' ? 'عدد / متر' : 'Unit / Meter'}
                     className="w-full px-2 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs text-center"
                   />
                 </div>
@@ -8540,7 +8542,7 @@ export default function Home() {
                   type="text"
                   value={techOfferTitle}
                   onChange={(e) => setTechOfferTitle(e.target.value)}
-                  placeholder="Technical Architecture & CCTV SOW Rev. 1"
+                  placeholder={lang === 'ar' ? 'مثال: العرض الفني لتوريد وتركيب شبكة الألياف الضوئية' : 'e.g. Technical Proposal for Optical Fiber Network'}
                   required
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
@@ -8553,7 +8555,7 @@ export default function Home() {
                   onChange={(e) => setTechOfferScope(e.target.value)}
                   rows={3}
                   required
-                  placeholder="Supply, installation, cabling, testing, and commissioning..."
+                  placeholder={lang === 'ar' ? 'مثال: توريد وتركيب الكابلات والتمديدات والاختبار والتشغيل التجريبي وفق المواصفات...' : 'e.g. Supply, installation, cabling, testing, and commissioning as per specs...'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -8564,7 +8566,7 @@ export default function Home() {
                   value={techOfferDeliverables}
                   onChange={(e) => setTechOfferDeliverables(e.target.value)}
                   rows={2}
-                  placeholder="As-built drawings, user manuals, warranty certificates..."
+                  placeholder={lang === 'ar' ? 'مثال: المخططات الهندسية كما نُفذت (As-Built)، دليل التشغيل، شهادات الضمان المعتمدة...' : 'e.g. As-built drawings, operations manuals, certified warranty letters...'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -8613,7 +8615,7 @@ export default function Home() {
                   type="text"
                   value={commOfferTitle}
                   onChange={(e) => setCommOfferTitle(e.target.value)}
-                  placeholder="Commercial Quotation - Phase 1"
+                  placeholder={lang === 'ar' ? 'مثال: العرض المالي لتنفيذ المرحلة الأولى — توريدات الأعمال الميدانية' : 'e.g. Commercial Quotation — Phase 1 Field Deliverables'}
                   required
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
@@ -8728,7 +8730,7 @@ export default function Home() {
                     type="text"
                     value={invNumber}
                     onChange={(e) => setInvNumber(e.target.value)}
-                    placeholder="INV-2026-001"
+                    placeholder={lang === 'ar' ? 'مثال: INV-2026-001' : 'e.g. INV-2026-001'}
                     required
                     className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                   />
@@ -8753,7 +8755,7 @@ export default function Home() {
                   type="text"
                   value={invMilestone}
                   onChange={(e) => setInvMilestone(e.target.value)}
-                  placeholder="Phase 1 - Completion of CCTV cabling"
+                  placeholder={lang === 'ar' ? 'مثال: المستخلص الجاري رقم 1 — إتمام أعمال التمديدات الميدانية' : 'e.g. Interim Invoice 1 — Completion of field cabling'}
                   required
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
@@ -8775,7 +8777,7 @@ export default function Home() {
                   type="text"
                   value={invNotes}
                   onChange={(e) => setInvNotes(e.target.value)}
-                  placeholder="Subject to site engineer approval"
+                  placeholder={lang === 'ar' ? 'مثال: خاضع لمطابقة مهندس الموقع واستشاري المشروع' : 'e.g. Subject to site engineer and consultant approval'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -8825,7 +8827,7 @@ export default function Home() {
                     type="text"
                     value={matCode}
                     onChange={(e) => setMatCode(e.target.value)}
-                    placeholder="MAT-CAT6-01"
+                    placeholder={lang === 'ar' ? 'مثال: MAT-CAT6-01' : 'e.g. MAT-CAT6-01'}
                     required
                     className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                   />
@@ -8852,7 +8854,7 @@ export default function Home() {
                   type="text"
                   value={matName}
                   onChange={(e) => setMatName(e.target.value)}
-                  placeholder="Cat6 UTP Cable 305M Roll"
+                  placeholder={lang === 'ar' ? 'مثال: لفة كابل شبكات Cat6 UTP طول 305 متر' : 'e.g. Cat6 UTP Network Cable 305M Roll'}
                   required
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
@@ -8864,7 +8866,7 @@ export default function Home() {
                   type="text"
                   value={matSpec}
                   onChange={(e) => setMatSpec(e.target.value)}
-                  placeholder="Schneider / Legrand Pure Copper"
+                  placeholder={lang === 'ar' ? 'مثال: نحاس نقي 100% معتمد (شنايدر / ليجراند)' : 'e.g. 100% Pure Copper (Schneider / Legrand)'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -8876,7 +8878,7 @@ export default function Home() {
                     type="text"
                     value={matUnit}
                     onChange={(e) => setMatUnit(e.target.value)}
-                    placeholder="Roll / Pcs"
+                    placeholder={lang === 'ar' ? 'لفة / قطعة' : 'Roll / Pcs'}
                     className="w-full px-2 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs text-center"
                   />
                 </div>
@@ -9048,7 +9050,7 @@ export default function Home() {
                     type="text"
                     value={assetTag}
                     onChange={(e) => setAssetTag(e.target.value)}
-                    placeholder="AST-FIBER-01"
+                    placeholder={lang === 'ar' ? 'مثال: AST-FIBER-01' : 'e.g. AST-FIBER-01'}
                     required
                     className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                   />
@@ -9059,7 +9061,7 @@ export default function Home() {
                     type="text"
                     value={assetCat}
                     onChange={(e) => setAssetCat(e.target.value)}
-                    placeholder="Fusion Splicer / OTDR"
+                    placeholder={lang === 'ar' ? 'مثال: أجهزة لحام فايبر / أجهزة OTDR' : 'e.g. Fusion Splicer / OTDR'}
                     required
                     className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                   />
@@ -9072,7 +9074,7 @@ export default function Home() {
                   type="text"
                   value={assetName}
                   onChange={(e) => setAssetName(e.target.value)}
-                  placeholder="Fujikura 90S+ Optical Fiber Fusion Splicer"
+                  placeholder={lang === 'ar' ? 'مثال: ماكينة لحام ألياف ضوئية فوجيكورا 90S+' : 'e.g. Fujikura 90S+ Optical Fiber Fusion Splicer'}
                   required
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
@@ -9085,7 +9087,7 @@ export default function Home() {
                     type="text"
                     value={assetModel}
                     onChange={(e) => setAssetModel(e.target.value)}
-                    placeholder="90S+"
+                    placeholder={lang === 'ar' ? 'مثال: 90S+ Core Alignment' : 'e.g. 90S+ Core Alignment'}
                     className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                   />
                 </div>
@@ -9095,7 +9097,7 @@ export default function Home() {
                     type="text"
                     value={assetSerial}
                     onChange={(e) => setAssetSerial(e.target.value)}
-                    placeholder="SN-2026849"
+                    placeholder={lang === 'ar' ? 'مثال: SN-2026849' : 'e.g. SN-2026849'}
                     className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                   />
                 </div>
@@ -9145,7 +9147,7 @@ export default function Home() {
                   type="text"
                   value={riskTitle}
                   onChange={(e) => setRiskTitle(e.target.value)}
-                  placeholder="Potential shipment delay for core switches"
+                  placeholder={lang === 'ar' ? 'مثال: احتمالية تأخر وصول كابلات الألياف الضوئية المستوردة' : 'e.g. Potential shipment delay for core optical cables'}
                   required
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
@@ -9158,7 +9160,7 @@ export default function Home() {
                   onChange={(e) => setRiskDesc(e.target.value)}
                   rows={2}
                   required
-                  placeholder="Port customs clearance may delay delivery by 14 days..."
+                  placeholder={lang === 'ar' ? 'مثال: إجراءات الإفراج الجمركي قد تستغرق 10 أيام إضافية مما يؤثر على الجدول الزمني...' : 'e.g. Port customs clearance may delay delivery by 10 days impacting schedule...'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -9207,7 +9209,7 @@ export default function Home() {
                   value={riskMitigation}
                   onChange={(e) => setRiskMitigation(e.target.value)}
                   rows={2}
-                  placeholder="Pre-clearance documentation filed with forwarder..."
+                  placeholder={lang === 'ar' ? 'مثال: تم التنسيق مع وكيل الشحن للفسح المسبق وتوفير كميات طارئة من المورد المحلي...' : 'e.g. Pre-clearance filed with logistics agent and localized contingency stock arranged...'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -9256,7 +9258,7 @@ export default function Home() {
                   type="text"
                   value={issueTitle}
                   onChange={(e) => setIssueTitle(e.target.value)}
-                  placeholder="Power socket missing at Gate 3 for camera pole"
+                  placeholder={lang === 'ar' ? 'مثال: انقطاع التيار الكهربائي عن محطة التقوية رقم 3' : 'e.g. Power failure at booster station 3'}
                   required
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
@@ -9269,7 +9271,7 @@ export default function Home() {
                   onChange={(e) => setIssueDesc(e.target.value)}
                   rows={3}
                   required
-                  placeholder="Civil works team has not delivered 220V conduit..."
+                  placeholder={lang === 'ar' ? 'مثال: الأعمال المدنية لم تسلم مسار كابلات الجهد 220 فولت حتى الآن مما يعطل تشغيل الكاميرا...' : 'e.g. Civil team has not handed over the 220V conduit path yet, halting camera testing...'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -9358,7 +9360,7 @@ export default function Home() {
                   value={handoverSnags}
                   onChange={(e) => setHandoverSnags(e.target.value)}
                   rows={2}
-                  placeholder="1. Camera 4 angle adjustment needed. 2. Rack labels to be replaced."
+                  placeholder={lang === 'ar' ? 'مثال: 1. إعادة ضبط زاوية كاميرا البوابة رقم 4. 2. استبدال بطاقات ترقيم كابلات الراك.' : 'e.g. 1. Adjust Gate 4 camera angle. 2. Replace patch panel cable labels.'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
@@ -9390,7 +9392,7 @@ export default function Home() {
                   type="text"
                   value={handoverWarrantyTerms}
                   onChange={(e) => setHandoverWarrantyTerms(e.target.value)}
-                  placeholder="1 Year 24/7 on-site warranty including parts and replacement"
+                  placeholder={lang === 'ar' ? 'مثال: ضمان شامل لمدة عام يشمل قطع الغيار الأصلية والدعم الفني الميداني 24/7' : 'e.g. 1 Year comprehensive warranty including parts and 24/7 on-site support'}
                   className="w-full px-3 py-1.5 bg-slate-800/80 border border-slate-500/40 rounded-xl text-white text-xs"
                 />
               </div>
