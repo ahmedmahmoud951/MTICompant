@@ -55,6 +55,16 @@ export const DelegationsTab: React.FC<DelegationsTabProps> = ({ currentUser, lan
     loadLookups();
   }, [activeOnly]);
 
+  useEffect(() => {
+    const handleUpdate = () => {
+      loadLookups();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('mti_users_updated', handleUpdate);
+      return () => window.removeEventListener('mti_users_updated', handleUpdate);
+    }
+  }, []);
+
   const loadDelegations = async () => {
     setLoading(true);
     try {

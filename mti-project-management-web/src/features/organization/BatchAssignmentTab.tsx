@@ -83,6 +83,16 @@ export const BatchAssignmentTab: React.FC<BatchAssignmentTabProps> = ({ currentU
   }, []);
 
   useEffect(() => {
+    const handleUpdate = () => {
+      loadLookups();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('mti_users_updated', handleUpdate);
+      return () => window.removeEventListener('mti_users_updated', handleUpdate);
+    }
+  }, []);
+
+  useEffect(() => {
     if (assignmentScope === 'project' && projects.length > 0 && !selectedProjectId) {
       setSelectedProjectId(projects[0].id);
     } else if (assignmentScope === 'site' && sites.length > 0 && !selectedSiteId) {

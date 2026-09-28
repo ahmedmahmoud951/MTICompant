@@ -163,6 +163,9 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
         setShowCreateModal(false);
         resetForm();
         loadUsers();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('mti_users_updated'));
+        }
       } else {
         setErrorMsg(res.message || 'Failed to create user');
       }
@@ -193,6 +196,9 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
       if (res.success) {
         setShowEditModal(false);
         loadUsers();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('mti_users_updated'));
+        }
       } else {
         setErrorMsg(res.message || 'Failed to update profile');
       }
@@ -211,6 +217,9 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
       const res = await usersAdminService.toggleUserStatus(user.id, !user.isActive, 'Admin toggle status');
       if (res.success) {
         loadUsers();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('mti_users_updated'));
+        }
       }
     } catch (err) {
       console.error(err);

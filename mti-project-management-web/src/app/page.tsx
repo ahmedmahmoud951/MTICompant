@@ -56,6 +56,7 @@ import {
 } from '@/features';
 import { GlobalSearchModal } from '@/components/GlobalSearchModal';
 import { ActivityTimeline } from '@/components/ActivityTimeline';
+import { UserMultiSelector } from '@/components/common/UserMultiSelector';
 import {
   Compass,
   Cpu,
@@ -1033,6 +1034,7 @@ export default function Home() {
           localStorage.setItem('mti_user', JSON.stringify(freshUser));
           setCurrentUser(freshUser);
           initSignalR();
+          refreshUserList();
         } else if (me.message && me.message.includes('401')) {
           logger.warn('Session expired (401), logging out.');
           apiClient.clearTokens();
@@ -1043,6 +1045,36 @@ export default function Home() {
       }
     })();
   }, []);
+
+  // Real-time synchronization for users created or modified anywhere in the system
+  useEffect(() => {
+    const handleUsersUpdated = () => {
+      refreshUserList();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('mti_users_updated', handleUsersUpdated);
+      return () => window.removeEventListener('mti_users_updated', handleUsersUpdated);
+    }
+  }, []);
+
+  // When opening modals that require user assignment, fetch the freshest user list
+  useEffect(() => {
+    if (showNewProjectModal || showNewTaskModal) {
+      refreshUserList();
+    }
+  }, [showNewProjectModal, showNewTaskModal]);
+
+  const refreshUserList = async () => {
+    try {
+      const users = await dashboardService.getUsers();
+      if (Array.isArray(users)) {
+        setUserList(users);
+        logger.info(`[Users] Refreshed user list: ${users.length} users`);
+      }
+    } catch (e) {
+      console.error('Failed to refresh users', e);
+    }
+  };
 
   const initSignalR = async () => {
     try {
@@ -1355,14 +1387,17 @@ export default function Home() {
     setIsLoadingContent(true);
     try {
       await loadProjects();
-      const isAdminUser = user.roles.includes('Admin') || user.roles.includes('SystemAdmin');
+      const isAdminUser = user.roles.includes('Admin') || user.roles.includes('SystemAdmin') || user.roles.includes('SuperAdmin');
       if (isAdminUser) {
         dashboardService.getAdminStats().then(setAdminStats).catch(() => { });
-        dashboardService.getUsers().then(setUserList).catch(() => { });
         dashboardService.getAuditLogs().then((res) => setAuditLogs(res.items)).catch(() => { });
       } else {
         dashboardService.getEngineerStats().then(setEngineerStats).catch(() => { });
       }
+      // Always load user list for task and project assignment across all authenticated users
+      dashboardService.getUsers().then((res) => {
+        if (Array.isArray(res)) setUserList(res);
+      }).catch(() => { });
       // Load both approved and pending data records for ALL roles so the archive and reports are always populated on initial load and page reload
       dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => { });
       dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => { });
@@ -7644,65 +7679,19 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {/* Assign Members Section (Horizontal Cards) */}
+                    {/* Assign Members Section (Distinguished Multi-User Selector) */}
                     {isAdmin && (
-                      <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold uppercase tracking-wider text-cyan-400 flex items-center gap-2">
-                            <Users className="w-4 h-4" />
-                            {lang === 'ar' ? 'إسناد مستخدمين وفريق العمل' : 'Assign Project Team'}
-                          </label>
-                          {newProjectMemberIds.length > 0 && (
-                            <span className="text-[11px] font-semibold text-cyan-300 bg-cyan-500/15 border border-cyan-500/30 px-2.5 py-0.5 rounded-full">
-                              {lang === 'ar'
-                                ? `${newProjectMemberIds.length} مستخدم محدد`
-                                : `${newProjectMemberIds.length} selected`}
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-44 overflow-y-auto custom-scrollbar p-1">
-                          {userList.length === 0 ? (
-                            <div className="col-span-2 py-4 text-center text-xs text-slate-400">
-                              {lang === 'ar' ? 'لا يوجد مستخدمون متاحون' : 'No users loaded'}
-                            </div>
-                          ) : (
-                            userList.map((u) => {
-                              const checked = newProjectMemberIds.includes(u.id);
-                              return (
-                                <label
-                                  key={u.id}
-                                  className={`flex items-center gap-2.5 p-2 rounded-xl border transition cursor-pointer ${checked
-                                      ? 'bg-cyan-500/15 border-cyan-500/50 shadow-sm'
-                                      : 'bg-slate-900/60 border-slate-700/40 hover:bg-slate-800/80 hover:border-slate-600/60'
-                                    }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => {
-                                      setNewProjectMemberIds((prev) =>
-                                        checked ? prev.filter((id) => id !== u.id) : [...prev, u.id]
-                                      );
-                                    }}
-                                    className="rounded border-slate-600 text-cyan-500 focus:ring-0 focus:ring-offset-0"
-                                  />
-                                  <div className="w-7 h-7 rounded-lg bg-slate-800 border border-slate-600 flex items-center justify-center text-xs font-bold text-slate-200 shrink-0">
-                                    {u.firstName?.[0] || 'U'}
-                                  </div>
-                                  <div className="min-w-0 flex-1">
-                                    <p className="text-xs font-semibold text-slate-100 truncate">
-                                      {u.firstName} {u.lastName}
-                                    </p>
-                                    <p className="text-[10px] text-slate-400 truncate">{u.email}</p>
-                                  </div>
-                                </label>
-                              );
-                            })
-                          )}
-                        </div>
-                        <p className="text-[10px] text-slate-400">{t('hintProjectMembers')}</p>
-                      </div>
+                      <UserMultiSelector
+                        selectedUserIds={newProjectMemberIds}
+                        onChange={setNewProjectMemberIds}
+                        users={userList}
+                        isArabic={lang === 'ar'}
+                        mode="multi"
+                        maxHeight="max-h-64"
+                        title={lang === 'ar' ? 'إسناد فريق العمل والمستخدمين للمشروع' : 'Assign Project Team & Members'}
+                        subtitle={lang === 'ar' ? 'حدد المستخدمين والمهندسين المصرح لهم بالعمل والمتابعة في هذا المشروع' : 'Select users authorized to work and track this project'}
+                        onRefresh={refreshUserList}
+                      />
                     )}
                   </div>
 
@@ -8004,25 +7993,19 @@ export default function Home() {
                 </select>
               </div>
 
-              {/* 3. Assignee */}
+              {/* 3. Assignee (Distinguished Single-User Selector) */}
               <div>
-                <label className="block text-xs font-semibold text-slate-200 mb-1">
-                  {lang === 'ar' ? 'المسند إليه (Assignee)' : 'Assign to'}
-                </label>
-                <select
-                  value={newTaskAssigneeId}
-                  onChange={(e) => setNewTaskAssigneeId(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
-                >
-                  <option value="">
-                    {lang === 'ar' ? 'غير مسند / عام للفريق' : 'Unassigned / Team general'}
-                  </option>
-                  {userList.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.firstName} {u.lastName} ({u.email})
-                    </option>
-                  ))}
-                </select>
+                <UserMultiSelector
+                  selectedUserIds={newTaskAssigneeId ? [newTaskAssigneeId] : []}
+                  onChange={(ids) => setNewTaskAssigneeId(ids[0] || '')}
+                  users={userList}
+                  isArabic={lang === 'ar'}
+                  mode="single"
+                  maxHeight="max-h-52"
+                  title={lang === 'ar' ? 'المسند إليه المهمة (Assignee)' : 'Task Assignee'}
+                  subtitle={lang === 'ar' ? 'اختر المهندس أو المسؤول عن تنفيذ هذه المهمة' : 'Select the person responsible for this task'}
+                  onRefresh={refreshUserList}
+                />
               </div>
 
               {/* 4. Title */}

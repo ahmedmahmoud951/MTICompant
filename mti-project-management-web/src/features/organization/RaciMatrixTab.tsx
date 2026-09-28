@@ -61,6 +61,16 @@ export const RaciMatrixTab: React.FC<RaciMatrixTabProps> = ({ currentUser, lang 
   }, []);
 
   useEffect(() => {
+    const handleUpdate = () => {
+      loadAssignees();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('mti_users_updated', handleUpdate);
+      return () => window.removeEventListener('mti_users_updated', handleUpdate);
+    }
+  }, []);
+
+  useEffect(() => {
     if (resourceType === 'Project' && projects.length > 0 && !selectedResourceId) {
       setSelectedResourceId(projects[0].id);
     } else if (resourceType === 'Site' && sites.length > 0 && !selectedResourceId) {
