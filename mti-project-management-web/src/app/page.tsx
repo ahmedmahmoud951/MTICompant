@@ -8175,16 +8175,20 @@ export default function Home() {
               {!editingUserId && (
                 <>
                   <div>
-                    <label className="block text-xs text-slate-200 mb-1">{t('corporateEmail')}</label>
+                    <label className="block text-xs text-slate-200 mb-1">{t('emailOrUsername')}</label>
                     <input
-                      type="email"
+                      type="text"
                       value={newUserEmail}
                       onChange={(e) => setNewUserEmail(e.target.value)}
-                      placeholder="field.engineer@mti.com"
+                      placeholder={lang === 'ar' ? 'مثال: ahmed_ali أو eng_mohamed أو ahmed@mti.com' : 'e.g. ahmed_ali, eng_mohamed or ahmed@mti.com'}
                       required
                       className="w-full px-3 py-2 bg-slate-800/70 border border-slate-500/40 rounded-xl text-white text-sm"
                     />
-                    <p className="text-[10px] text-slate-400 mt-1">{t('hintUserEmail')}</p>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      {lang === 'ar'
+                        ? 'اسم المستخدم لتسجيل الدخول (يمكن استخدام أي اسم عادي بدون @ أو بريد إلكتروني)'
+                        : 'System username (any name without @ or an email)'}
+                    </p>
                   </div>
 
                   <div>

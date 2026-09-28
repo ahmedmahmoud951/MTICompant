@@ -502,15 +502,19 @@ export const UserAdminTab: React.FC<UserAdminTabProps> = ({ currentUser, lang })
 
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1">
-                  {isArabic ? 'البريد الإلكتروني' : 'Email Address'}
+                  {isArabic ? 'اسم المستخدم (User Name) أو البريد' : 'Username or Email'}
                 </label>
                 <input
-                  type="email"
+                  type="text"
                   required
                   value={formEmail}
                   onChange={(e) => setFormEmail(e.target.value)}
+                  placeholder={isArabic ? 'مثال: ahmed_ali أو eng_mohamed أو ahmed@mti.com' : 'e.g. ahmed_ali, eng_mohamed or ahmed@mti.com'}
                   className="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-100 text-xs"
                 />
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  {isArabic ? 'يمكنك استخدام أي اسم عادي بدون @ لتسجيل الدخول، أو بريد إلكتروني' : 'Accepts any standard username without @, or an email'}
+                </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
