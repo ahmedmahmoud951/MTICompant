@@ -1032,6 +1032,7 @@ export default function Home() {
           const freshUser = me.data.user;
           localStorage.setItem('mti_user', JSON.stringify(freshUser));
           setCurrentUser(freshUser);
+          initSignalR();
         } else if (me.message && me.message.includes('401')) {
           logger.warn('Session expired (401), logging out.');
           apiClient.clearTokens();
