@@ -1065,6 +1065,9 @@ export default function Home() {
   }, [showNewProjectModal, showNewTaskModal]);
 
   const refreshUserList = async () => {
+    const u = currentUser || authService.getCurrentUser();
+    const canAccessUsers = u?.roles?.some((r) => ['Admin', 'SystemAdmin', 'SuperAdmin', 'ProjectManager'].includes(r));
+    if (!canAccessUsers) return;
     try {
       const users = await dashboardService.getUsers();
       if (Array.isArray(users)) {
@@ -1394,10 +1397,13 @@ export default function Home() {
       } else {
         dashboardService.getEngineerStats().then(setEngineerStats).catch(() => { });
       }
-      // Always load user list for task and project assignment across all authenticated users
-      dashboardService.getUsers().then((res) => {
-        if (Array.isArray(res)) setUserList(res);
-      }).catch(() => { });
+      // Load full user list for roles with project/task assignment permissions
+      const canManageUsers = user.roles.some((r) => ['Admin', 'SystemAdmin', 'SuperAdmin', 'ProjectManager'].includes(r));
+      if (canManageUsers) {
+        dashboardService.getUsers().then((res) => {
+          if (Array.isArray(res)) setUserList(res);
+        }).catch(() => { });
+      }
       // Load both approved and pending data records for ALL roles so the archive and reports are always populated on initial load and page reload
       dataRecordService.getApprovedRecords().then(setApprovedRecords).catch(() => { });
       dataRecordService.getPendingApprovals().then(setPendingRecords).catch(() => { });

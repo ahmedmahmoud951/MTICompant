@@ -11,7 +11,7 @@ namespace MTI.ProjectManagement.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Admin,SystemAdmin,ProjectManager")]
+[Authorize]
 public class UsersController : ControllerBase
 {
     private readonly IAppDbContext _dbContext;
@@ -98,6 +98,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin,SystemAdmin,SuperAdmin,ProjectManager")]
     public async Task<ActionResult<AdminUserDto>> Create(
         [FromBody] CreateUserRequest request,
         CancellationToken cancellationToken)
@@ -153,6 +154,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin,SystemAdmin,SuperAdmin,ProjectManager")]
     public async Task<ActionResult<AdminUserDto>> Update(
         Guid id,
         [FromBody] UpdateUserRequest request,
@@ -217,6 +219,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("{id}/reset-password")]
+    [Authorize(Roles = "Admin,SystemAdmin,SuperAdmin,ProjectManager")]
     public async Task<IActionResult> ResetPassword(
         Guid id,
         [FromBody] AdminResetPasswordRequest request,
@@ -249,6 +252,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin,SystemAdmin,SuperAdmin,ProjectManager")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted, cancellationToken: cancellationToken);
@@ -331,6 +335,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPut("{id:guid}/profile")]
+    [Authorize(Roles = "Admin,SystemAdmin,SuperAdmin,ProjectManager")]
     public async Task<ActionResult<ApiResponse<AdminUserDetailDto>>> UpdateUserProfile(Guid id, [FromBody] UpdateUserAdminRequest request, CancellationToken cancellationToken)
     {
         var user = await _dbContext.Users
@@ -503,6 +508,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("{id:guid}/assign-department")]
+    [Authorize(Roles = "Admin,SystemAdmin,SuperAdmin,ProjectManager")]
     public async Task<ActionResult<ApiResponse<bool>>> AssignDepartment(Guid id, [FromBody] AssignUserDepartmentRequest request, CancellationToken cancellationToken)
     {
         var dept = await _dbContext.Departments.FindAsync(new object[] { request.DepartmentId }, cancellationToken);
@@ -537,6 +543,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost("{id:guid}/assign-team")]
+    [Authorize(Roles = "Admin,SystemAdmin,SuperAdmin,ProjectManager")]
     public async Task<ActionResult<ApiResponse<bool>>> AssignTeam(Guid id, [FromBody] AssignUserTeamRequest request, CancellationToken cancellationToken)
     {
         var team = await _dbContext.Teams.FindAsync(new object[] { request.TeamId }, cancellationToken);
@@ -571,6 +578,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPatch("{id:guid}/status")]
+    [Authorize(Roles = "Admin,SystemAdmin,SuperAdmin,ProjectManager")]
     public async Task<ActionResult<ApiResponse<bool>>> ToggleUserStatus(Guid id, CancellationToken cancellationToken)
     {
         var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted, cancellationToken);
